@@ -110,7 +110,7 @@ const TrabajosPanel = ({ user }) => {
         }, 3000);
     };
 
-    // Función para verificar actualizaciones - MEJORADA
+    // Función para verificar actualizaciones - CORREGIDA
     const checkForUpdates = async () => {
         try {
             console.log('🔍 Verificando actualizaciones en el servidor...');
@@ -497,7 +497,7 @@ const TrabajosPanel = ({ user }) => {
                 const trabajosFromAPI = response.data.data;
                 console.log('📥 Trabajos recibidos:', trabajosFromAPI.length);
                 
-                // También actualizar el state hash después de cargar
+                // Actualizar el state hash después de cargar
                 const hashResponse = await axios.get(`/api/trabajos/last-update?t=${Date.now()}`, {
                     headers: {
                         'Authorization': `Bearer ${token}`,
@@ -529,7 +529,7 @@ const TrabajosPanel = ({ user }) => {
                     }
                 });
                 
-                console.log('🆕 Sections actualizadas');
+                console.log('🆕 Sections actualizadas:', newSections);
                 setSections(newSections);
             }
         } catch (error) {
