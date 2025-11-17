@@ -12,7 +12,11 @@
         "laravel/tinker": "^2.10.1",
         "ext-pdo": "*",
         "ext-mysqli": "*",
-        "ext-curl": "*"
+        "ext-curl": "*",
+        "ext-json": "*",
+        "ext-mbstring": "*",
+        "ext-xml": "*",
+        "ext-zip": "*"
     },
     "require-dev": {
         "fakerphp/faker": "^1.23",
