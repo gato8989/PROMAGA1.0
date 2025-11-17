@@ -129,13 +129,11 @@ const TrabajosPanel = ({ user }) => {
     const checkForUpdates = async () => {
         try {
             console.log('🔍 Verificando actualizaciones...');
-            console.log('📊 ESTADO lastUpdate:', lastUpdate);
-            console.log('📊 REF lastUpdateRef:', lastUpdateRef.current);
+            console.log('📊 lastUpdateRef:', lastUpdateRef.current);
             
             const token = localStorage.getItem('token');
             
-            const timestamp = Date.now();
-            const response = await axios.get(`/api/trabajos/last-update?t=${timestamp}`, {
+            const response = await axios.get(`/api/trabajos/last-update?t=${Date.now()}`, {
                 headers: {
                     'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'
@@ -143,28 +141,29 @@ const TrabajosPanel = ({ user }) => {
             });
 
             console.log('✅ Respuesta recibida:', response.data);
+            console.log('🔍 DEBUG del servidor:', response.data.debug);
 
             if (response.data.success) {
-                const serverLastUpdate = response.data.last_update;
-                const currentLastUpdate = lastUpdateRef.current;
+                const serverStateHash = response.data.state_hash;
+                const currentStateHash = lastUpdateRef.current;
                 
-                if (currentLastUpdate === null) {
-                    console.log('📅 Inicializando timestamp:', serverLastUpdate);
-                    lastUpdateRef.current = serverLastUpdate;
-                    setLastUpdate(serverLastUpdate);
+                if (currentStateHash === null) {
+                    console.log('📅 Inicializando state hash:', serverStateHash);
+                    lastUpdateRef.current = serverStateHash;
+                    await fetchTrabajos();
                     setPollingStatus('active');
-                } else if (serverLastUpdate > currentLastUpdate) {
+                } else if (serverStateHash !== currentStateHash) {
                     console.log('🔄 Cambios detectados! Actualizando trabajos...');
-                    console.log('Timestamp anterior:', currentLastUpdate);
-                    console.log('Timestamp nuevo:', serverLastUpdate);
+                    console.log('Hash anterior:', currentStateHash);
+                    console.log('Hash nuevo:', serverStateHash);
+                    console.log('Detalles del cambio:', response.data.debug);
                     setPollingStatus('updating');
                     await fetchTrabajos();
-                    lastUpdateRef.current = serverLastUpdate;
-                    setLastUpdate(serverLastUpdate);
+                    lastUpdateRef.current = serverStateHash;
                     setPollingStatus('active');
                     console.log('✅ Actualización completada');
                 } else {
-                    console.log('✅ No hay cambios');
+                    console.log('✅ No hay cambios - mismo state_hash');
                     setPollingStatus('active');
                 }
             }

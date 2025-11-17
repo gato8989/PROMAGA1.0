@@ -43,7 +43,43 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/users/{user}', [UserController::class, 'destroy']);
 
     // Trabajos routes
-    Route::get('/trabajos/last-update', [TrabajoController::class, 'getLastUpdate']);
+    Route::get('/trabajos/last-update', function() {
+        try {
+            // Solo usar el contador de trabajos - esto SI cambia cuando se agregan/eliminan
+            $trabajosCount = \App\Models\Trabajo::count();
+            
+            // También obtener el último ID para mayor precisión
+            $lastTrabajo = \App\Models\Trabajo::orderBy('id', 'desc')->first();
+            $lastId = $lastTrabajo ? $lastTrabajo->id : 0;
+            
+            $stateHash = md5($trabajosCount . '|' . $lastId);
+
+            return response()->json([
+                'success' => true,
+                'last_update' => time(), // Siempre tiempo actual para forzar comparación
+                'state_hash' => $stateHash,
+                'trabajos_count' => $trabajosCount,
+                'last_id' => $lastId,
+                'current_time' => time(),
+                'message' => 'Última actualización obtenida',
+                'debug' => [
+                    'trabajos_count' => $trabajosCount,
+                    'last_id' => $lastId
+                ]
+            ]);
+            
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Error obteniendo última actualización',
+                'last_update' => time(),
+                'state_hash' => 'error'
+            ], 500);
+        }
+    });
+
+
+
     Route::put('/trabajos/{id}', [TrabajoController::class, 'update']);
     Route::get('/trabajos', [TrabajoController::class, 'index']);
     Route::post('/trabajos', [TrabajoController::class, 'store']);
