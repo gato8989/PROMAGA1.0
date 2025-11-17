@@ -42,11 +42,11 @@ const TrabajosPanel = ({ user }) => {
     });
     const [guardandoEdicion, setGuardandoEdicion] = useState(false);
 
-    // Estados para polling - ACTUALIZADOS
+    // Estados para polling - CORREGIDOS
     const [pollingStatus, setPollingStatus] = useState('inactive');
     const pollingRef = useRef(null);
-    const stateHashRef = useRef(null);
-    const forceUpdateRef = useRef(false);
+    const lastHashRef = useRef(null);
+    const [forceRefresh, setForceRefresh] = useState(0);
 
     // Estados para los trabajos activos en el FORMULARIO ACTUAL
     const [trabajosActivosForm, setTrabajosActivosForm] = useState({
@@ -76,17 +76,13 @@ const TrabajosPanel = ({ user }) => {
         ]
     });
 
-    // Estado local para almacenar los subtrabajos seleccionados de cada trabajo
-    const [subtrabajosSeleccionados, setSubtrabajosSeleccionados] = useState({});
-
-    // Efecto principal - ACTUALIZADO
+    // Efecto principal
     useEffect(() => {
+        console.log('🚀 Iniciando TrabajosPanel...');
         checkApiStatus();
         fetchMarcas();
-        // Cargar trabajos iniciales y luego iniciar polling
-        fetchTrabajos().then(() => {
-            startPolling();
-        });
+        fetchTrabajos();
+        startPolling();
 
         return () => {
             if (pollingRef.current) {
@@ -96,25 +92,79 @@ const TrabajosPanel = ({ user }) => {
         };
     }, []);
 
-    // Polling inteligente - VERSIÓN CORREGIDA
+    // Efecto para forzar actualizaciones
+    useEffect(() => {
+        if (forceRefresh > 0) {
+            console.log('🔄 Forzando actualización por cambio local...');
+            fetchTrabajos();
+        }
+    }, [forceRefresh]);
+
+    // Polling simplificado y efectivo
     const startPolling = () => {
-        console.log('🟢 Iniciando polling...');
+        console.log('🟢 Iniciando polling cada 3 segundos...');
         setPollingStatus('active');
 
         pollingRef.current = setInterval(() => {
             checkForUpdates();
-        }, 5000);
-
-        // Verificar inmediatamente
-        setTimeout(() => {
-            checkForUpdates();
-        }, 1000);
+        }, 3000);
     };
 
-    // Efecto para debuggear cambios en sections
-    useEffect(() => {
-        console.log('🔄 Sections actualizado:', sections);
-    }, [sections]);
+    // Función para verificar actualizaciones - MEJORADA
+    const checkForUpdates = async () => {
+        try {
+            console.log('🔍 Verificando actualizaciones en el servidor...');
+            
+            const token = localStorage.getItem('token');
+            const response = await axios.get(`/api/trabajos/last-update?t=${Date.now()}`, {
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                },
+                timeout: 10000
+            });
+
+            if (response.data.success) {
+                const serverStateHash = response.data.state_hash;
+                const currentStateHash = lastHashRef.current;
+                
+                console.log('🔍 State Hash - Servidor:', serverStateHash);
+                console.log('🔍 State Hash - Local:', currentStateHash);
+                console.log('📊 Debug servidor:', response.data.debug);
+                
+                if (currentStateHash === null) {
+                    // Primera vez - inicializar
+                    console.log('📅 Inicializando state hash:', serverStateHash);
+                    lastHashRef.current = serverStateHash;
+                    setPollingStatus('active');
+                } else if (serverStateHash !== currentStateHash) {
+                    // ¡HAY CAMBIOS!
+                    console.log('🔄 CAMBIOS DETECTADOS! Hash diferente, actualizando...');
+                    console.log('Hash anterior:', currentStateHash);
+                    console.log('Hash nuevo:', serverStateHash);
+                    setPollingStatus('updating');
+                    
+                    // Forzar recarga de trabajos
+                    await fetchTrabajos();
+                    
+                    // Actualizar hash local
+                    lastHashRef.current = serverStateHash;
+                    setPollingStatus('active');
+                    console.log('✅ Actualización completada después de cambios detectados');
+                } else {
+                    // Sin cambios
+                    console.log('✅ No hay cambios - mismo state_hash');
+                    setPollingStatus('active');
+                }
+            } else {
+                console.log('❌ Error en respuesta del servidor');
+                setPollingStatus('error');
+            }
+        } catch (error) {
+            console.log('❌ Error de conexión:', error.message);
+            setPollingStatus('error');
+        }
+    };
 
     // Función para verificar si el usuario puede terminar trabajos
     const canTerminarTrabajos = () => {
@@ -124,67 +174,6 @@ const TrabajosPanel = ({ user }) => {
     // Función para verificar si el usuario es administrador
     const isAdmin = () => {
         return user && user.role === 'admin';
-    };
-
-    // Función para verificar actualizaciones - CORREGIDA
-    const checkForUpdates = async () => {
-        // Si hay cambios locales pendientes, forzar actualización
-        if (forceUpdateRef.current) {
-            console.log('🔄 Cambios locales detectados, forzando actualización...');
-            await fetchTrabajos();
-            forceUpdateRef.current = false;
-            return;
-        }
-
-        try {
-            console.log('🔍 Verificando actualizaciones...');
-            
-            const token = localStorage.getItem('token');
-            const response = await axios.get(`/api/trabajos/last-update?t=${Date.now()}`, {
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                }
-            });
-
-            if (response.data.success) {
-                const serverStateHash = response.data.state_hash;
-                const currentStateHash = stateHashRef.current;
-                
-                console.log('🔍 State Hash - Servidor:', serverStateHash, 'Local:', currentStateHash);
-                
-                if (currentStateHash === null) {
-                    // Primera vez - inicializar
-                    console.log('📅 Inicializando state hash:', serverStateHash);
-                    stateHashRef.current = serverStateHash;
-                    setPollingStatus('active');
-                } else if (serverStateHash !== currentStateHash) {
-                    // Hay cambios - actualizar
-                    console.log('🔄 Cambios detectados! Actualizando trabajos...');
-                    console.log('Hash anterior:', currentStateHash);
-                    console.log('Hash nuevo:', serverStateHash);
-                    setPollingStatus('updating');
-                    await fetchTrabajos();
-                    stateHashRef.current = serverStateHash;
-                    setPollingStatus('active');
-                    console.log('✅ Actualización completada');
-                } else {
-                    // Sin cambios
-                    console.log('✅ No hay cambios');
-                    setPollingStatus('active');
-                }
-            }
-        } catch (error) {
-            console.log('❌ Error de conexión:', error.message);
-            setPollingStatus('error');
-            
-            // Reintentar después de 10 segundos en caso de error
-            setTimeout(() => {
-                if (pollingRef.current) {
-                    setPollingStatus('active');
-                }
-            }, 10000);
-        }
     };
 
     // Verificar estado de la API NHTSA
@@ -324,16 +313,8 @@ const TrabajosPanel = ({ user }) => {
             });
 
             if (response.data.success) {
-                setSections(prev => prev.map(section => {
-                    if (section && section.id === currentNotasTrabajo.id) {
-                        return {
-                            ...section,
-                            notas: notasText
-                        };
-                    }
-                    return section;
-                }));
-                
+                // Forzar actualización después de guardar notas
+                setForceRefresh(prev => prev + 1);
                 setShowNotasPopup(false);
             }
         } catch (error) {
@@ -350,7 +331,7 @@ const TrabajosPanel = ({ user }) => {
         setNotasText('');
     };
 
-    // Funciones para edición - ACTUALIZADAS
+    // Funciones para edición - ACTUALIZADAS para forzar actualización
     const handleAbrirEdicion = (trabajo) => {
         setTrabajoEditando(trabajo);
         setFormDataEditar({
@@ -385,12 +366,10 @@ const TrabajosPanel = ({ user }) => {
         
         const nuevosSubtrabajos = { ...formDataEditar.subtrabajos_seleccionados };
         
-        // Si cambió el tipo de trabajo, mantener los subtrabajos existentes o inicializar vacío
         if (trabajoAnterior !== value) {
             if (!nuevosSubtrabajos[value]) {
                 nuevosSubtrabajos[value] = [];
             }
-            // Eliminar el trabajo anterior si ya no existe en la lista
             const existeTrabajoAnterior = nuevosTrabajos.includes(trabajoAnterior);
             if (!existeTrabajoAnterior && trabajoAnterior in nuevosSubtrabajos) {
                 delete nuevosSubtrabajos[trabajoAnterior];
@@ -409,7 +388,6 @@ const TrabajosPanel = ({ user }) => {
         const nuevosTrabajos = formDataEditar.trabajos.filter((_, i) => i !== index);
         const nuevosSubtrabajos = { ...formDataEditar.subtrabajos_seleccionados };
         
-        // Eliminar los subtrabajos asociados a este trabajo si ya no existe en la lista
         const existeTrabajo = nuevosTrabajos.includes(trabajoAEliminar);
         if (!existeTrabajo && trabajoAEliminar in nuevosSubtrabajos) {
             delete nuevosSubtrabajos[trabajoAEliminar];
@@ -422,17 +400,14 @@ const TrabajosPanel = ({ user }) => {
         }));
     };
 
-    // Función para manejar subtrabajos en edición
     const handleToggleSubtrabajoEdicion = (trabajoType, subtrabajo, checked) => {
         setFormDataEditar(prev => {
             const subtrabajosActuales = prev.subtrabajos_seleccionados[trabajoType] || [];
             let nuevosSubtrabajos;
             
             if (checked) {
-                // Agregar subtrabajo si no existe
                 nuevosSubtrabajos = [...subtrabajosActuales, subtrabajo];
             } else {
-                // Eliminar subtrabajo
                 nuevosSubtrabajos = subtrabajosActuales.filter(st => st !== subtrabajo);
             }
             
@@ -446,7 +421,7 @@ const TrabajosPanel = ({ user }) => {
         });
     };
 
-    // En la función handleGuardarEdicion, actualízala así:
+    // Función de guardar edición - ACTUALIZADA para forzar polling
     const handleGuardarEdicion = async () => {
         if (!trabajoEditando) return;
 
@@ -454,7 +429,6 @@ const TrabajosPanel = ({ user }) => {
             setGuardandoEdicion(true);
             const token = localStorage.getItem('token');
 
-            // Preparar datos para enviar
             const datosActualizados = {
                 marca: formDataEditar.marca,
                 modelo: formDataEditar.modelo,
@@ -464,7 +438,7 @@ const TrabajosPanel = ({ user }) => {
                 subtrabajos_seleccionados: formDataEditar.subtrabajos_seleccionados
             };
 
-            console.log('Enviando datos actualizados:', datosActualizados);
+            console.log('💾 Guardando cambios en el servidor...');
 
             const response = await axios.put(`/api/trabajos/${trabajoEditando.id}`, datosActualizados, {
                 headers: {
@@ -474,36 +448,11 @@ const TrabajosPanel = ({ user }) => {
             });
 
             if (response.data.success) {
-                console.log('✅ Cambios guardados en el servidor:', response.data);
+                console.log('✅ Cambios guardados exitosamente');
                 
-                // SOLO ACTUALIZACIÓN LOCAL - SIN RECARGAR DESDE EL SERVIDOR
-                setSections(prevSections => {
-                    const nuevasSections = [...prevSections];
-                    const sectionIndex = nuevasSections.findIndex(s => s && s.id === trabajoEditando.id);
-                    
-                    if (sectionIndex !== -1 && nuevasSections[sectionIndex]) {
-                        // Crear una copia completamente nueva del objeto
-                        nuevasSections[sectionIndex] = {
-                            ...nuevasSections[sectionIndex],
-                            marca: formDataEditar.marca,
-                            modelo: formDataEditar.modelo,
-                            año: formDataEditar.año,
-                            trabajos: formDataEditar.trabajos.filter(t => t.trim() !== ''),
-                            color: formDataEditar.color,
-                            subtrabajos_seleccionados: { ...formDataEditar.subtrabajos_seleccionados }
-                        };
-                        
-                        console.log('🔄 Sección actualizada localmente:', nuevasSections[sectionIndex]);
-                    }
-                    
-                    return nuevasSections;
-                });
-
-                // MARCAR para forzar actualización en el próximo polling
-                forceUpdateRef.current = true;
-                console.log('🚩 Marcado para forzar actualización en próximo polling');
+                // Forzar actualización inmediata después de editar
+                setForceRefresh(prev => prev + 1);
                 
-                // Cerrar el popup inmediatamente
                 setShowEditarPopup(false);
                 setTrabajoEditando(null);
                 
@@ -512,7 +461,6 @@ const TrabajosPanel = ({ user }) => {
             }
         } catch (error) {
             console.error('❌ Error guardando edición:', error);
-            console.error('Detalles del error:', error.response?.data);
             alert('Error al guardar los cambios: ' + (error.response?.data?.error || error.message));
         } finally {
             setGuardandoEdicion(false);
@@ -531,10 +479,10 @@ const TrabajosPanel = ({ user }) => {
         });
     };
 
-    // Cargar trabajos desde la API - ACTUALIZADO
+    // Cargar trabajos desde la API - ACTUALIZADA
     const fetchTrabajos = async () => {
         try {
-            console.log('🔄 Iniciando fetchTrabajos...');
+            console.log('🔄 Cargando trabajos desde el servidor...');
             setLoading(true);
             const token = localStorage.getItem('token');
             
@@ -547,9 +495,9 @@ const TrabajosPanel = ({ user }) => {
 
             if (response.data.success) {
                 const trabajosFromAPI = response.data.data;
-                console.log('📥 Trabajos recibidos del servidor:', trabajosFromAPI);
+                console.log('📥 Trabajos recibidos:', trabajosFromAPI.length);
                 
-                // Obtener el state_hash actual del servidor
+                // También actualizar el state hash después de cargar
                 const hashResponse = await axios.get(`/api/trabajos/last-update?t=${Date.now()}`, {
                     headers: {
                         'Authorization': `Bearer ${token}`,
@@ -558,11 +506,10 @@ const TrabajosPanel = ({ user }) => {
                 });
                 
                 if (hashResponse.data.success) {
-                    stateHashRef.current = hashResponse.data.state_hash;
-                    console.log('🔄 State hash actualizado después de fetch:', stateHashRef.current);
+                    lastHashRef.current = hashResponse.data.state_hash;
+                    console.log('🔐 State hash actualizado:', lastHashRef.current);
                 }
                 
-                // Crear nuevo array completamente nuevo
                 const newSections = Array(6).fill(null);
                 
                 trabajosFromAPI.forEach((trabajo, index) => {
@@ -572,25 +519,18 @@ const TrabajosPanel = ({ user }) => {
                             marca: trabajo.marca,
                             modelo: trabajo.modelo,
                             año: trabajo.año,
-                            trabajos: [...trabajo.trabajos], // Copia del array
+                            trabajos: [...trabajo.trabajos],
                             color: trabajo.color,
                             fechaIngreso: trabajo.fecha_ingreso,
-                            subtrabajosEstado: { ...trabajo.subtrabajos_estado }, // Copia del objeto
+                            subtrabajosEstado: { ...trabajo.subtrabajos_estado },
                             notas: trabajo.notas || '',
-                            subtrabajos_seleccionados: { ...trabajo.subtrabajos_seleccionados } // Copia del objeto
+                            subtrabajos_seleccionados: { ...trabajo.subtrabajos_seleccionados }
                         };
                     }
                 });
                 
-                console.log('🆕 Nuevas sections a establecer:', newSections);
-                
-                // Usar una función de actualización para asegurar que React detecte el cambio
-                setSections(currentSections => {
-                    console.log('📋 Sections anterior:', currentSections);
-                    console.log('📋 Sections nuevo:', newSections);
-                    return newSections;
-                });
-                
+                console.log('🆕 Sections actualizadas');
+                setSections(newSections);
             }
         } catch (error) {
             console.error('❌ Error cargando trabajos:', error);
@@ -698,18 +638,8 @@ const TrabajosPanel = ({ user }) => {
                 }
             });
 
-            setSections(prev => prev.map(section => {
-                if (section && section.id === trabajoId) {
-                    return {
-                        ...section,
-                        subtrabajosEstado: {
-                            ...section.subtrabajosEstado,
-                            [subtrabajo]: isGreen
-                        }
-                    };
-                }
-                return section;
-            }));
+            // Forzar actualización después de cambiar estado
+            setForceRefresh(prev => prev + 1);
 
         } catch (error) {
             console.error('Error actualizando subtrabajo:', error);
@@ -757,9 +687,7 @@ const TrabajosPanel = ({ user }) => {
 
                 if (response.data.success) {
                     // Forzar actualización después de crear
-                    forceUpdateRef.current = true;
-                    console.log('🚩 Marcado para forzar actualización después de crear trabajo');
-                    await fetchTrabajos();
+                    setForceRefresh(prev => prev + 1);
                     setShowPopup(false);
                 }
 
@@ -807,9 +735,7 @@ const TrabajosPanel = ({ user }) => {
 
                 if (response.data.success) {
                     // Forzar actualización después de eliminar
-                    forceUpdateRef.current = true;
-                    console.log('🚩 Marcado para forzar actualización después de terminar trabajo');
-                    await fetchTrabajos();
+                    setForceRefresh(prev => prev + 1);
                 } else {
                     console.error('Error del servidor:', response.data);
                     alert('Error del servidor: ' + (response.data.error || 'Error desconocido'));
@@ -817,7 +743,6 @@ const TrabajosPanel = ({ user }) => {
 
             } catch (error) {
                 console.error('Error terminando trabajo:', error);
-                console.error('Detalles del error:', error.response?.data);
                 alert('Error al terminar el trabajo: ' + (error.response?.data?.error || error.message));
             }
         } else {
@@ -1013,7 +938,7 @@ const TrabajosPanel = ({ user }) => {
     );
 };
 
-// Componentes auxiliares (se mantienen igual)
+// Componentes auxiliares
 const NotasPopup = ({ notas, onNotasChange, onGuardar, onCancelar, guardando, vehiculo }) => {
     return (
         <div className="popup-overlay">
@@ -1393,7 +1318,7 @@ const CheckboxGroup = ({ trabajos, trabajosActivos, onToggle }) => {
     );
 };
 
-// Componente EditarPopup ACTUALIZADO - Con mismo estilo que agregar nuevo trabajo
+// Componente EditarPopup
 const EditarPopup = ({ 
     formData, 
     trabajosData,

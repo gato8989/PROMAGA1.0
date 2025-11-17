@@ -45,35 +45,62 @@ Route::middleware('auth:sanctum')->group(function () {
     // Trabajos routes
     Route::get('/trabajos/last-update', function() {
         try {
-            // Solo usar el contador de trabajos - esto SI cambia cuando se agregan/eliminan
-            $trabajosCount = \App\Models\Trabajo::count();
+            // Obtener el último updated_at de TODOS los trabajos activos (no completados)
+            $lastUpdate = \App\Models\Trabajo::where('completado', false)->max('updated_at');
             
-            // También obtener el último ID para mayor precisión
-            $lastTrabajo = \App\Models\Trabajo::orderBy('id', 'desc')->first();
-            $lastId = $lastTrabajo ? $lastTrabajo->id : 0;
+            // Si no hay trabajos activos, obtener de todos los trabajos
+            if (!$lastUpdate) {
+                $lastUpdate = \App\Models\Trabajo::max('updated_at');
+            }
             
-            $stateHash = md5($trabajosCount . '|' . $lastId);
+            // Si aún no hay trabajos, usar timestamp actual
+            if (!$lastUpdate) {
+                $lastUpdate = now();
+            } else {
+                // Convertir a Carbon si es string
+                $lastUpdate = \Carbon\Carbon::parse($lastUpdate);
+            }
+            
+            // También obtener conteo de trabajos activos para mayor precisión
+            $trabajosCount = \App\Models\Trabajo::where('completado', false)->count();
+            
+            // Crear un hash más robusto que incluya timestamp y conteo
+            $stateHash = md5($lastUpdate->timestamp . '|' . $trabajosCount . '|' . $lastUpdate->format('Y-m-d H:i:s'));
+
+            \Illuminate\Support\Facades\Log::info('State hash generado', [
+                'last_update_timestamp' => $lastUpdate->timestamp,
+                'trabajos_count' => $trabajosCount,
+                'state_hash' => $stateHash,
+                'last_updated_at' => $lastUpdate->toISOString()
+            ]);
 
             return response()->json([
                 'success' => true,
-                'last_update' => time(), // Siempre tiempo actual para forzar comparación
+                'last_update' => $lastUpdate->timestamp,
                 'state_hash' => $stateHash,
                 'trabajos_count' => $trabajosCount,
-                'last_id' => $lastId,
-                'current_time' => time(),
+                'last_updated_at' => $lastUpdate->toISOString(),
+                'current_time' => now()->timestamp,
                 'message' => 'Última actualización obtenida',
                 'debug' => [
+                    'last_updated_at' => $lastUpdate->toISOString(),
                     'trabajos_count' => $trabajosCount,
-                    'last_id' => $lastId
+                    'timestamp' => $lastUpdate->timestamp,
+                    'hash_source' => $lastUpdate->timestamp . '|' . $trabajosCount . '|' . $lastUpdate->format('Y-m-d H:i:s')
                 ]
             ]);
             
         } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('Error en last-update:', [
+                'message' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
             return response()->json([
                 'success' => false,
                 'error' => 'Error obteniendo última actualización',
                 'last_update' => time(),
-                'state_hash' => 'error'
+                'state_hash' => 'error_' . time()
             ], 500);
         }
     });
