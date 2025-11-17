@@ -43,34 +43,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/users/{user}', [UserController::class, 'destroy']);
 
     // Trabajos routes
-    Route::get('/trabajos/last-update', function() {
-        try {
-            // Obtener el último trabajo modificado o creado
-            $lastTrabajo = \App\Models\Trabajo::orderBy('updated_at', 'desc')->first();
-            
-            // Si no hay trabajos, usar timestamp actual
-            $lastUpdate = $lastTrabajo ? $lastTrabajo->updated_at->timestamp : time();
-            
-            return response()->json([
-                'success' => true,
-                'last_update' => $lastUpdate,
-                'current_time' => time(),
-                'message' => 'Última actualización obtenida',
-                'debug' => [
-                    'last_trabajo_id' => $lastTrabajo ? $lastTrabajo->id : null,
-                    'last_updated_at' => $lastTrabajo ? $lastTrabajo->updated_at : null
-                ]
-            ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'error' => 'Error obteniendo última actualización: ' . $e->getMessage(),
-                'last_update' => time(), // Fallback
-                'current_time' => time()
-            ], 500);
-        }
-    });
-
+    Route::get('/trabajos/last-update', [TrabajoController::class, 'getLastUpdate']);
     Route::put('/trabajos/{id}', [TrabajoController::class, 'update']);
     Route::get('/trabajos', [TrabajoController::class, 'index']);
     Route::post('/trabajos', [TrabajoController::class, 'store']);

@@ -43,7 +43,7 @@ const TrabajosPanel = ({ user }) => {
     const [guardandoEdicion, setGuardandoEdicion] = useState(false);
 
     // Estados para polling
-    const [lastUpdate, setLastUpdate] = useState(null);
+    const [lastStateHash, setLastStateHash] = useState(null);
     const [pollingStatus, setPollingStatus] = useState('inactive');
     const pollingRef = useRef(null);
 
@@ -137,19 +137,25 @@ const TrabajosPanel = ({ user }) => {
                 }
             });
 
+            console.log('✅ Respuesta recibida:', response.data);
+
             if (response.data.success) {
-                const serverLastUpdate = response.data.last_update;
+                const serverStateHash = response.data.state_hash;
                 
-                if (lastUpdate === null) {
-                    console.log('📅 Inicializando timestamp y cargando trabajos...');
-                    setLastUpdate(serverLastUpdate);
-                    await fetchTrabajos(); // Cargar trabajos en la inicialización
+                if (lastStateHash === null) {
+                    // Primera vez
+                    console.log('📅 Inicializando state hash:', serverStateHash);
+                    setLastStateHash(serverStateHash);
+                    await fetchTrabajos(); // Cargar trabajos iniciales
                     setPollingStatus('active');
-                } else if (serverLastUpdate !== lastUpdate) {
+                } else if (serverStateHash !== lastStateHash) {
+                    // Hay cambios reales
                     console.log('🔄 Cambios detectados! Actualizando trabajos...');
+                    console.log('Hash anterior:', lastStateHash);
+                    console.log('Hash nuevo:', serverStateHash);
                     setPollingStatus('updating');
                     await fetchTrabajos();
-                    setLastUpdate(serverLastUpdate);
+                    setLastStateHash(serverStateHash);
                     setPollingStatus('active');
                 } else {
                     console.log('✅ No hay cambios');

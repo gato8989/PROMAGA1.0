@@ -337,29 +337,41 @@ class TrabajoController extends Controller
     public function getLastUpdate()
     {
         try {
-            // Obtener el último updated_at de trabajos activos
-            $lastUpdate = Trabajo::where('completado', false)
-                ->max('updated_at');
+            // Obtener el timestamp de la última modificación en la tabla trabajos
+            $lastTrabajo = Trabajo::orderBy('updated_at', 'desc')->first();
             
-            // Si no hay trabajos, usar timestamp actual
-            $timestamp = $lastUpdate ? $lastUpdate->getTimestamp() : now()->timestamp;
+            // También considerar si se han agregado o eliminado trabajos
+            $latestCreated = Trabajo::orderBy('created_at', 'desc')->first();
+            $trabajosCount = Trabajo::count();
             
-            Log::info('Última actualización obtenida', ['timestamp' => $timestamp]);
+            // Crear un hash único basado en el estado actual de los trabajos
+            $stateHash = md5(
+                ($lastTrabajo ? $lastTrabajo->updated_at->timestamp : '0') . 
+                ($latestCreated ? $latestCreated->created_at->timestamp : '0') . 
+                $trabajosCount
+            );
             
             return response()->json([
                 'success' => true,
-                'last_update' => $timestamp,
-                'current_time' => now()->timestamp,
-                'message' => 'Última actualización obtenida'
+                'last_update' => $lastTrabajo ? $lastTrabajo->updated_at->timestamp : time(),
+                'state_hash' => $stateHash, // Hash del estado actual
+                'trabajos_count' => $trabajosCount,
+                'current_time' => time(),
+                'message' => 'Última actualización obtenida',
+                'debug' => [
+                    'last_trabajo_id' => $lastTrabajo ? $lastTrabajo->id : null,
+                    'last_updated_at' => $lastTrabajo ? $lastTrabajo->updated_at->toDateTimeString() : null,
+                    'trabajos_count' => $trabajosCount
+                ]
             ]);
-
         } catch (\Exception $e) {
-            Log::error('Error en getLastUpdate:', ['error' => $e->getMessage()]);
+            \Log::error('Error en getLastUpdate:', ['error' => $e->getMessage()]);
             
             return response()->json([
                 'success' => false,
-                'error' => 'Error al obtener última actualización',
-                'last_update' => now()->timestamp // Fallback
+                'error' => 'Error obteniendo última actualización',
+                'last_update' => time(),
+                'current_time' => time()
             ], 500);
         }
     }
