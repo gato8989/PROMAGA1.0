@@ -128,9 +128,9 @@ const TrabajosPanel = ({ user }) => {
     const checkForUpdates = async () => {
         try {
             console.log('🔍 Verificando actualizaciones...');
+            console.log('📊 lastUpdate actual:', lastUpdate);
             const token = localStorage.getItem('token');
             
-            // Agregar timestamp para evitar cache
             const timestamp = Date.now();
             const response = await axios.get(`/api/trabajos/last-update?t=${timestamp}`, {
                 headers: {
@@ -140,33 +140,28 @@ const TrabajosPanel = ({ user }) => {
             });
 
             console.log('✅ Respuesta recibida:', response.data);
+            console.log('📊 serverLastUpdate:', response.data.last_update);
+            console.log('📊 Comparación:', response.data.last_update > lastUpdate);
 
             if (response.data.success) {
                 const serverLastUpdate = response.data.last_update;
                 
                 if (lastUpdate === null) {
-                    // Primera vez - establecer timestamp inicial
                     console.log('📅 Inicializando timestamp:', serverLastUpdate);
                     setLastUpdate(serverLastUpdate);
                     setPollingStatus('active');
                 } else if (serverLastUpdate > lastUpdate) {
-                    // Hay cambios - actualizar trabajos
                     console.log('🔄 Cambios detectados! Actualizando trabajos...');
                     setPollingStatus('updating');
                     
-                    // Forzar recarga de trabajos con cache-busting
+                    // Forzar recarga completa
                     await fetchTrabajos();
                     
-                    // Esperar un poco para asegurar que los datos se cargaron
-                    setTimeout(() => {
-                        setLastUpdate(serverLastUpdate);
-                        setPollingStatus('active');
-                        console.log('✅ Actualización completada');
-                    }, 500);
-                    
+                    setLastUpdate(serverLastUpdate);
+                    setPollingStatus('active');
+                    console.log('✅ Actualización completada. Nuevo lastUpdate:', serverLastUpdate);
                 } else {
-                    // No hay cambios
-                    console.log('✅ No hay cambios');
+                    console.log('✅ No hay cambios - serverLastUpdate no es mayor');
                     setPollingStatus('active');
                 }
             } else {
@@ -525,12 +520,12 @@ const TrabajosPanel = ({ user }) => {
     // Cargar trabajos desde la API
     const fetchTrabajos = async () => {
         try {
+            console.log('🔄 Iniciando fetchTrabajos...');
             setLoading(true);
             const token = localStorage.getItem('token');
             
-            // Agregar timestamp para evitar cache
             const timestamp = Date.now();
-            const response = await axios.get(`/api/trabajos?t=${timestamp}`, {
+            const response = await axios.get(`/api/trabajos?t=${timestamp}&force=true`, {
                 headers: {
                     'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'
@@ -541,7 +536,9 @@ const TrabajosPanel = ({ user }) => {
                 const trabajosFromAPI = response.data.data;
                 console.log('📥 Trabajos recibidos del servidor:', trabajosFromAPI);
                 
+                // Crear nuevo array completamente nuevo
                 const newSections = Array(6).fill(null);
+                
                 trabajosFromAPI.forEach((trabajo, index) => {
                     if (index < 6) {
                         newSections[index] = {
@@ -549,27 +546,28 @@ const TrabajosPanel = ({ user }) => {
                             marca: trabajo.marca,
                             modelo: trabajo.modelo,
                             año: trabajo.año,
-                            trabajos: trabajo.trabajos,
+                            trabajos: [...trabajo.trabajos], // Copia del array
                             color: trabajo.color,
                             fechaIngreso: trabajo.fecha_ingreso,
-                            subtrabajosEstado: trabajo.subtrabajos_estado || {},
+                            subtrabajosEstado: { ...trabajo.subtrabajos_estado }, // Copia del objeto
                             notas: trabajo.notas || '',
-                            subtrabajos_seleccionados: trabajo.subtrabajos_seleccionados || {}
+                            subtrabajos_seleccionados: { ...trabajo.subtrabajos_seleccionados } // Copia del objeto
                         };
                     }
                 });
                 
-                // Forzar actualización del estado
-                setSections([]); // Limpiar primero
-                setTimeout(() => {
-                    setSections(newSections);
-                    console.log('✅ Trabajos cargados en estado local:', newSections);
-                }, 100);
+                console.log('🆕 Nuevas sections a establecer:', newSections);
+                
+                // Usar una función de actualización para asegurar que React detecte el cambio
+                setSections(currentSections => {
+                    console.log('📋 Sections anterior:', currentSections);
+                    console.log('📋 Sections nuevo:', newSections);
+                    return newSections;
+                });
                 
             }
         } catch (error) {
             console.error('❌ Error cargando trabajos:', error);
-            alert('Error al cargar los trabajos');
         } finally {
             setLoading(false);
         }
@@ -896,6 +894,42 @@ const TrabajosPanel = ({ user }) => {
     return (
         <div className="dashboard-panel">
             <PollingStatusIndicator />
+            
+<div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '10px' }}>
+    <PollingStatusIndicator />
+    <button 
+        onClick={() => {
+            console.log('🔄 Forzando actualización manual...');
+            fetchTrabajos();
+        }}
+        style={{
+            padding: '5px 10px',
+            background: '#007bff',
+            color: 'white',
+            border: 'none',
+            borderRadius: '4px',
+            cursor: 'pointer'
+        }}
+    >
+        🔄 Forzar Actualización
+    </button>
+    <button 
+        onClick={() => {
+            console.log('🔍 Forzando check de updates...');
+            checkForUpdates();
+        }}
+        style={{
+            padding: '5px 10px',
+            background: '#28a745',
+            color: 'white',
+            border: 'none',
+            borderRadius: '4px',
+            cursor: 'pointer'
+        }}
+    >
+        🔍 Verificar Cambios
+    </button>
+</div>
             
             <div className="trabajos-grid">
                 <div className="row rowcustom">
