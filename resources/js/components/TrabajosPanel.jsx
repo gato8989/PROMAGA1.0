@@ -94,12 +94,12 @@ const TrabajosPanel = ({ user }) => {
         };
     }, []);
 
-    // Polling inteligente - VERSIÓN SIMPLIFICADA
+    // Polling inteligente - VERSIÓN MEJORADA
     const startPolling = () => {
         console.log('🟢 Iniciando polling...');
         setPollingStatus('active');
 
-        // Verificar cambios cada 30 segundos
+        // Verificar cambios cada 5 segundos (más frecuente para testing)
         pollingRef.current = setInterval(() => {
             checkForUpdates();
         }, 5000);
@@ -107,8 +107,13 @@ const TrabajosPanel = ({ user }) => {
         // Verificar inmediatamente al cargar
         setTimeout(() => {
             checkForUpdates();
-        }, 2000);
+        }, 1000);
     };
+
+    // Efecto para debuggear cambios en sections
+    useEffect(() => {
+        console.log('🔄 Sections actualizado:', sections);
+    }, [sections]);
 
     // Función para verificar si el usuario puede terminar trabajos
     const canTerminarTrabajos = () => {
@@ -125,7 +130,9 @@ const TrabajosPanel = ({ user }) => {
             console.log('🔍 Verificando actualizaciones...');
             const token = localStorage.getItem('token');
             
-            const response = await axios.get('/api/trabajos/last-update', {
+            // Agregar timestamp para evitar cache
+            const timestamp = Date.now();
+            const response = await axios.get(`/api/trabajos/last-update?t=${timestamp}`, {
                 headers: {
                     'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'
@@ -146,9 +153,17 @@ const TrabajosPanel = ({ user }) => {
                     // Hay cambios - actualizar trabajos
                     console.log('🔄 Cambios detectados! Actualizando trabajos...');
                     setPollingStatus('updating');
+                    
+                    // Forzar recarga de trabajos con cache-busting
                     await fetchTrabajos();
-                    setLastUpdate(serverLastUpdate);
-                    setPollingStatus('active');
+                    
+                    // Esperar un poco para asegurar que los datos se cargaron
+                    setTimeout(() => {
+                        setLastUpdate(serverLastUpdate);
+                        setPollingStatus('active');
+                        console.log('✅ Actualización completada');
+                    }, 500);
+                    
                 } else {
                     // No hay cambios
                     console.log('✅ No hay cambios');
@@ -544,8 +559,13 @@ const TrabajosPanel = ({ user }) => {
                     }
                 });
                 
-                setSections(newSections);
-                console.log('✅ Trabajos cargados en estado local:', newSections);
+                // Forzar actualización del estado
+                setSections([]); // Limpiar primero
+                setTimeout(() => {
+                    setSections(newSections);
+                    console.log('✅ Trabajos cargados en estado local:', newSections);
+                }, 100);
+                
             }
         } catch (error) {
             console.error('❌ Error cargando trabajos:', error);
