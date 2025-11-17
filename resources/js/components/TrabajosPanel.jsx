@@ -102,7 +102,7 @@ const TrabajosPanel = ({ user }) => {
         // Verificar cambios cada 30 segundos
         pollingRef.current = setInterval(() => {
             checkForUpdates();
-        }, 30000);
+        }, 5000);
 
         // Verificar inmediatamente al cargar
         setTimeout(() => {
