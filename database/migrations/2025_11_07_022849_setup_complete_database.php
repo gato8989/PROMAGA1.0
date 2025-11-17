@@ -30,11 +30,7 @@ return new class extends Migration
 
         // 3. FINALMENTE agregar role_id a users (después de crear roles)
         Schema::table('users', function (Blueprint $table) {
-            $table->foreignId('role_id')
-                  ->default(2)
-                  ->after('id')
-                  ->constrained() // Esta línea requiere que roles exista
-                  ->onDelete('cascade');
+            $table->foreignId('role_id')->default(2)->after('id');
         });
     }
 

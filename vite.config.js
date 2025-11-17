@@ -5,16 +5,15 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
     plugins: [
         laravel({
-            input: ['resources/css/app.css', 'resources/js/app.js'],
+            input: ['resources/css/app.css', 'resources/js/app.jsx'],
             refresh: true,
         }),
         react(),
     ],
-    // AGREGAR ESTO PARA PRODUCCIÓN:
-    build: {
-        outDir: 'public/dist',
-        assetsDir: 'assets',
-    },
-    // Configuración base para producción
-    base: process.env.NODE_ENV === 'production' ? '/' : '/',
+    server: {
+        host: '0.0.0.0',
+        hmr: {
+            host: 'localhost'
+        }
+    }
 });
