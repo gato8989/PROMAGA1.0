@@ -2,9 +2,9 @@
 builder = "nixpacks"
 
 [build.args]
-NIXPACKS_INSTALL_CMD = "composer install --no-dev --optimize-autoloader && npm install --force"
+NIXPACKS_INSTALL_CMD = "composer install --no-dev --optimize-autoloader && npm install"
 NIXPACKS_BUILD_CMD = "npm run build"
 
 [deploy]
-startCommand = "php artisan serve --host=0.0.0.0 --port=$PORT"
+startCommand = "sh deployment/start.sh"
 restartPolicyType = "on_failure"

@@ -1,17 +1,25 @@
 #!/bin/bash
 
-# Crear en tu proyecto: deployment/start.sh
-
 echo "🚀 Iniciando aplicación Laravel..."
 
-# Configurar permisos de storage
-chmod -R 775 storage/
-chmod -R 775 bootstrap/cache/
+# Esperar a que la base de datos esté disponible (opcional)
+echo "⏳ Esperando base de datos..."
+sleep 5
+
+# Ejecutar migraciones
+echo "🗃️ Ejecutando migraciones..."
+php artisan migrate --force
+
+# Ejecutar seeders
+echo "🌱 Ejecutando seeders..."
+php artisan db:seed --force
 
 # Optimizar Laravel
+echo "⚡ Optimizando aplicación..."
 php artisan config:cache
 php artisan route:cache
 php artisan view:cache
 
 # Iniciar servidor
+echo "🌐 Iniciando servidor..."
 php artisan serve --host=0.0.0.0 --port=$PORT
