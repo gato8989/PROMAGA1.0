@@ -21,5 +21,9 @@ php artisan route:cache
 php artisan view:cache
 
 # Iniciar servidor
+php artisan route:clear
+php artisan cache:clear
+php artisan config:clear
+php artisan view:clear
 echo "🌐 Iniciando servidor..."
 php artisan serve --host=0.0.0.0 --port=$PORT
