@@ -46,6 +46,8 @@ const TrabajosPanel = ({ user }) => {
     const [lastStateHash, setLastStateHash] = useState(null);
     const [pollingStatus, setPollingStatus] = useState('inactive');
     const pollingRef = useRef(null);
+    const [lastUpdate, setLastUpdate] = useState(null);
+    const lastUpdateRef = useRef(null); // ← Agrega esta referencia
 
     // Estados para los trabajos activos en el FORMULARIO ACTUAL
     const [trabajosActivosForm, setTrabajosActivosForm] = useState({
@@ -127,6 +129,9 @@ const TrabajosPanel = ({ user }) => {
     const checkForUpdates = async () => {
         try {
             console.log('🔍 Verificando actualizaciones...');
+            console.log('📊 ESTADO lastUpdate:', lastUpdate);
+            console.log('📊 REF lastUpdateRef:', lastUpdateRef.current);
+            
             const token = localStorage.getItem('token');
             
             const timestamp = Date.now();
@@ -140,23 +145,24 @@ const TrabajosPanel = ({ user }) => {
             console.log('✅ Respuesta recibida:', response.data);
 
             if (response.data.success) {
-                const serverStateHash = response.data.state_hash;
+                const serverLastUpdate = response.data.last_update;
+                const currentLastUpdate = lastUpdateRef.current;
                 
-                if (lastStateHash === null) {
-                    // Primera vez
-                    console.log('📅 Inicializando state hash:', serverStateHash);
-                    setLastStateHash(serverStateHash);
-                    await fetchTrabajos(); // Cargar trabajos iniciales
+                if (currentLastUpdate === null) {
+                    console.log('📅 Inicializando timestamp:', serverLastUpdate);
+                    lastUpdateRef.current = serverLastUpdate;
+                    setLastUpdate(serverLastUpdate);
                     setPollingStatus('active');
-                } else if (serverStateHash !== lastStateHash) {
-                    // Hay cambios reales
+                } else if (serverLastUpdate > currentLastUpdate) {
                     console.log('🔄 Cambios detectados! Actualizando trabajos...');
-                    console.log('Hash anterior:', lastStateHash);
-                    console.log('Hash nuevo:', serverStateHash);
+                    console.log('Timestamp anterior:', currentLastUpdate);
+                    console.log('Timestamp nuevo:', serverLastUpdate);
                     setPollingStatus('updating');
                     await fetchTrabajos();
-                    setLastStateHash(serverStateHash);
+                    lastUpdateRef.current = serverLastUpdate;
+                    setLastUpdate(serverLastUpdate);
                     setPollingStatus('active');
+                    console.log('✅ Actualización completada');
                 } else {
                     console.log('✅ No hay cambios');
                     setPollingStatus('active');
@@ -167,7 +173,6 @@ const TrabajosPanel = ({ user }) => {
             setPollingStatus('error');
         }
     };
-
     
     // Verificar estado de la API NHTSA
     const checkApiStatus = async () => {
