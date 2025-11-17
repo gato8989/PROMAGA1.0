@@ -82,10 +82,9 @@ const TrabajosPanel = ({ user }) => {
     useEffect(() => {
         checkApiStatus();
         fetchMarcas();
-        fetchTrabajos();
+        // NO llames fetchTrabajos aquí, el polling se encargará
         startPolling();
 
-        // Limpiar al desmontar
         return () => {
             if (pollingRef.current) {
                 clearInterval(pollingRef.current);
@@ -128,7 +127,6 @@ const TrabajosPanel = ({ user }) => {
     const checkForUpdates = async () => {
         try {
             console.log('🔍 Verificando actualizaciones...');
-            console.log('📊 lastUpdate actual:', lastUpdate);
             const token = localStorage.getItem('token');
             
             const timestamp = Date.now();
@@ -139,34 +137,24 @@ const TrabajosPanel = ({ user }) => {
                 }
             });
 
-            console.log('✅ Respuesta recibida:', response.data);
-            console.log('📊 serverLastUpdate:', response.data.last_update);
-            console.log('📊 Comparación:', response.data.last_update > lastUpdate);
-
             if (response.data.success) {
                 const serverLastUpdate = response.data.last_update;
                 
                 if (lastUpdate === null) {
-                    console.log('📅 Inicializando timestamp:', serverLastUpdate);
+                    console.log('📅 Inicializando timestamp y cargando trabajos...');
                     setLastUpdate(serverLastUpdate);
+                    await fetchTrabajos(); // Cargar trabajos en la inicialización
                     setPollingStatus('active');
-                } else if (serverLastUpdate > lastUpdate) {
+                } else if (serverLastUpdate !== lastUpdate) {
                     console.log('🔄 Cambios detectados! Actualizando trabajos...');
                     setPollingStatus('updating');
-                    
-                    // Forzar recarga completa
                     await fetchTrabajos();
-                    
                     setLastUpdate(serverLastUpdate);
                     setPollingStatus('active');
-                    console.log('✅ Actualización completada. Nuevo lastUpdate:', serverLastUpdate);
                 } else {
-                    console.log('✅ No hay cambios - serverLastUpdate no es mayor');
+                    console.log('✅ No hay cambios');
                     setPollingStatus('active');
                 }
-            } else {
-                console.log('❌ Servidor respondió con error');
-                setPollingStatus('error');
             }
         } catch (error) {
             console.log('❌ Error de conexión:', error.message);
@@ -174,6 +162,7 @@ const TrabajosPanel = ({ user }) => {
         }
     };
 
+    
     // Verificar estado de la API NHTSA
     const checkApiStatus = async () => {
         try {
@@ -893,44 +882,7 @@ const TrabajosPanel = ({ user }) => {
 
     return (
         <div className="dashboard-panel">
-            <PollingStatusIndicator />
-            
-<div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '10px' }}>
-    <PollingStatusIndicator />
-    <button 
-        onClick={() => {
-            console.log('🔄 Forzando actualización manual...');
-            fetchTrabajos();
-        }}
-        style={{
-            padding: '5px 10px',
-            background: '#007bff',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: 'pointer'
-        }}
-    >
-        🔄 Forzar Actualización
-    </button>
-    <button 
-        onClick={() => {
-            console.log('🔍 Forzando check de updates...');
-            checkForUpdates();
-        }}
-        style={{
-            padding: '5px 10px',
-            background: '#28a745',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: 'pointer'
-        }}
-    >
-        🔍 Verificar Cambios
-    </button>
-</div>
-            
+            <PollingStatusIndicator />    
             <div className="trabajos-grid">
                 <div className="row rowcustom">
                     {[0, 1, 2].map(index => (
