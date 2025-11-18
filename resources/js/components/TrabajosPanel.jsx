@@ -133,7 +133,7 @@ const TrabajosPanel = ({ user }) => {
                 console.log('📊 Debug servidor:', response.data.debug);
                 
                 if (currentStateHash === null) {
-                    // Primera vez - inicializar CON STATE_HASH, NO TIMESTAMP
+                    // Primera vez - inicializar CON STATE_HASH, NO TIMESTAMP 2
                     console.log('📅 Inicializando state hash:', serverStateHash);
                     lastHashRef.current = serverStateHash;
                     setPollingStatus('active');
