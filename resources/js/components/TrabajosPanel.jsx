@@ -42,11 +42,13 @@ const TrabajosPanel = ({ user }) => {
     });
     const [guardandoEdicion, setGuardandoEdicion] = useState(false);
 
-    // Estados para polling - CORREGIDOS
+    // Estados para polling - OPTIMIZADOS
     const [pollingStatus, setPollingStatus] = useState('inactive');
     const pollingRef = useRef(null);
     const lastHashRef = useRef(null);
     const [forceRefresh, setForceRefresh] = useState(0);
+    const errorCountRef = useRef(0);
+    const consecutiveUpdatesRef = useRef(0);
 
     // Estados para los trabajos activos en el FORMULARIO ACTUAL
     const [trabajosActivosForm, setTrabajosActivosForm] = useState({
@@ -100,20 +102,41 @@ const TrabajosPanel = ({ user }) => {
         }
     }, [forceRefresh]);
 
-    // Polling simplificado y efectivo
+    // Polling optimizado - CON INTERVALO ADAPTATIVO
     const startPolling = () => {
-        console.log('🟢 Iniciando polling cada 3 segundos...');
+        console.log('🟢 Iniciando polling adaptativo...');
         setPollingStatus('active');
 
         pollingRef.current = setInterval(() => {
             checkForUpdates();
-        }, 3000);
+        }, getPollingInterval());
     };
 
-    // Función para verificar actualizaciones - CORREGIDA
+    // Intervalo de polling adaptativo
+    const getPollingInterval = () => {
+        // Si hay muchos cambios recientes, verificar más frecuentemente
+        if (consecutiveUpdatesRef.current > 2) {
+            return 2000; // 2 segundos durante actividad alta
+        }
+        
+        // Si hay errores, aumentar el intervalo para dar tiempo al servidor
+        if (errorCountRef.current > 0) {
+            return 10000; // 10 segundos si hay errores
+        }
+        
+        return 5000; // 5 segundos por defecto (reducido de 3 segundos)
+    };
+
+    // Función para verificar actualizaciones - OPTIMIZADA
     const checkForUpdates = async () => {
+        // Si ya está actualizando, saltar esta verificación
+        if (pollingStatus === 'updating') {
+            console.log('⏭️ Saltando verificación - ya se está actualizando');
+            return;
+        }
+
         try {
-            console.log('🔍 Verificando actualizaciones en el servidor...');
+            console.log('🔍 Verificando actualizaciones...');
             
             const token = localStorage.getItem('token');
             const response = await axios.get(`/api/trabajos/last-update?t=${Date.now()}`, {
@@ -121,7 +144,7 @@ const TrabajosPanel = ({ user }) => {
                     'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'
                 },
-                timeout: 10000
+                timeout: 8000 // Timeout reducido
             });
 
             if (response.data.success) {
@@ -130,19 +153,19 @@ const TrabajosPanel = ({ user }) => {
                 
                 console.log('🔍 State Hash - Servidor:', serverStateHash);
                 console.log('🔍 State Hash - Local:', currentStateHash);
-                console.log('📊 Debug servidor:', response.data.debug);
                 
                 if (currentStateHash === null) {
-                    // Primera vez - inicializar CON STATE_HASH, NO TIMESTAMP 2
+                    // Primera vez - inicializar
                     console.log('📅 Inicializando state hash:', serverStateHash);
                     lastHashRef.current = serverStateHash;
                     setPollingStatus('active');
+                    errorCountRef.current = 0; // Resetear contador de errores
                 } else if (serverStateHash !== currentStateHash) {
                     // ¡HAY CAMBIOS!
-                    console.log('🔄 CAMBIOS DETECTADOS! Hash diferente, actualizando...');
-                    console.log('Hash anterior:', currentStateHash);
-                    console.log('Hash nuevo:', serverStateHash);
+                    console.log('🔄 CAMBIOS DETECTADOS! Actualizando...');
                     setPollingStatus('updating');
+                    
+                    consecutiveUpdatesRef.current++;
                     
                     // Forzar recarga de trabajos
                     await fetchTrabajos();
@@ -150,20 +173,65 @@ const TrabajosPanel = ({ user }) => {
                     // Actualizar hash local
                     lastHashRef.current = serverStateHash;
                     setPollingStatus('active');
-                    console.log('✅ Actualización completada después de cambios detectados');
+                    console.log('✅ Actualización completada');
+                    
+                    // Reajustar intervalo si hay muchos cambios seguidos
+                    if (consecutiveUpdatesRef.current > 0) {
+                        adjustPollingInterval();
+                    }
                 } else {
-                    // Sin cambios
-                    console.log('✅ No hay cambios - mismo state_hash');
+                    // Sin cambios - resetear contador de actualizaciones consecutivas
+                    consecutiveUpdatesRef.current = 0;
+                    console.log('✅ No hay cambios');
                     setPollingStatus('active');
+                    errorCountRef.current = 0; // Resetear contador de errores
                 }
             } else {
                 console.log('❌ Error en respuesta del servidor');
-                setPollingStatus('error');
+                handlePollingError();
             }
         } catch (error) {
             console.log('❌ Error de conexión:', error.message);
-            setPollingStatus('error');
+            handlePollingError();
         }
+    };
+
+    // Manejo de errores optimizado
+    const handlePollingError = () => {
+        errorCountRef.current++;
+        setPollingStatus('error');
+        
+        // Si hay muchos errores consecutivos, aumentar el intervalo
+        if (errorCountRef.current > 3) {
+            console.log('⚠️ Muchos errores, aumentando intervalo de polling...');
+            restartPollingWithNewInterval(15000); // 15 segundos
+        } else if (errorCountRef.current > 1) {
+            restartPollingWithNewInterval(10000); // 10 segundos
+        }
+    };
+
+    // Reajustar intervalo de polling
+    const adjustPollingInterval = () => {
+        if (consecutiveUpdatesRef.current > 5) {
+            console.log('🚀 Alta actividad, manteniendo polling rápido');
+        } else if (consecutiveUpdatesRef.current > 2) {
+            console.log('⚡ Actividad moderada, ajustando polling');
+        }
+        
+        // Reiniciar polling con nuevo intervalo
+        restartPollingWithNewInterval(getPollingInterval());
+    };
+
+    // Reiniciar polling con nuevo intervalo
+    const restartPollingWithNewInterval = (newInterval) => {
+        if (pollingRef.current) {
+            clearInterval(pollingRef.current);
+        }
+        
+        console.log(`🔄 Reajustando intervalo de polling a ${newInterval}ms`);
+        pollingRef.current = setInterval(() => {
+            checkForUpdates();
+        }, newInterval);
     };
 
     // Función para verificar si el usuario puede terminar trabajos
@@ -184,7 +252,8 @@ const TrabajosPanel = ({ user }) => {
                 headers: {
                     'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'
-                }
+                },
+                timeout: 5000
             });
             
             setApiStatus(response.data.status);
@@ -203,7 +272,8 @@ const TrabajosPanel = ({ user }) => {
                 headers: {
                     'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'
-                }
+                },
+                timeout: 10000
             });
 
             if (response.data.success) {
@@ -230,7 +300,8 @@ const TrabajosPanel = ({ user }) => {
                 headers: {
                     'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'
-                }
+                },
+                timeout: 10000
             });
 
             if (response.data.success) {
@@ -258,7 +329,8 @@ const TrabajosPanel = ({ user }) => {
                 headers: {
                     'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'
-                }
+                },
+                timeout: 10000
             });
 
             if (response.data.success) {
@@ -309,7 +381,8 @@ const TrabajosPanel = ({ user }) => {
                 headers: {
                     'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'
-                }
+                },
+                timeout: 10000
             });
 
             if (response.data.success) {
@@ -331,7 +404,7 @@ const TrabajosPanel = ({ user }) => {
         setNotasText('');
     };
 
-    // Funciones para edición - ACTUALIZADAS para forzar actualización
+    // Funciones para edición
     const handleAbrirEdicion = (trabajo) => {
         setTrabajoEditando(trabajo);
         setFormDataEditar({
@@ -421,7 +494,7 @@ const TrabajosPanel = ({ user }) => {
         });
     };
 
-    // Función de guardar edición - ACTUALIZADA para forzar polling
+    // Función de guardar edición
     const handleGuardarEdicion = async () => {
         if (!trabajoEditando) return;
 
@@ -438,17 +511,18 @@ const TrabajosPanel = ({ user }) => {
                 subtrabajos_seleccionados: formDataEditar.subtrabajos_seleccionados
             };
 
-            console.log('💾 Guardando cambios en el servidor...');
+            console.log('💾 Guardando cambios...');
 
             const response = await axios.put(`/api/trabajos/${trabajoEditando.id}`, datosActualizados, {
                 headers: {
                     'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'
-                }
+                },
+                timeout: 10000
             });
 
             if (response.data.success) {
-                console.log('✅ Cambios guardados exitosamente');
+                console.log('✅ Cambios guardados');
                 
                 // Forzar actualización inmediata después de editar
                 setForceRefresh(prev => prev + 1);
@@ -479,10 +553,10 @@ const TrabajosPanel = ({ user }) => {
         });
     };
 
-    // Cargar trabajos desde la API - CORREGIDA
+    // Cargar trabajos desde la API - OPTIMIZADA
     const fetchTrabajos = async () => {
         try {
-            console.log('🔄 Cargando trabajos desde el servidor...');
+            console.log('🔄 Cargando trabajos...');
             setLoading(true);
             const token = localStorage.getItem('token');
             
@@ -490,24 +564,30 @@ const TrabajosPanel = ({ user }) => {
                 headers: {
                     'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'
-                }
+                },
+                timeout: 10000
             });
 
             if (response.data.success) {
                 const trabajosFromAPI = response.data.data;
                 console.log('📥 Trabajos recibidos:', trabajosFromAPI.length);
                 
-                // Obtener el state_hash actualizado después de cargar los trabajos
-                const hashResponse = await axios.get(`/api/trabajos/last-update?t=${Date.now()}`, {
-                    headers: {
-                        'Authorization': `Bearer ${token}`,
-                        'Content-Type': 'application/json'
+                // Obtener el state_hash actualizado
+                try {
+                    const hashResponse = await axios.get(`/api/trabajos/last-update?t=${Date.now()}`, {
+                        headers: {
+                            'Authorization': `Bearer ${token}`,
+                            'Content-Type': 'application/json'
+                        },
+                        timeout: 5000
+                    });
+                    
+                    if (hashResponse.data.success) {
+                        lastHashRef.current = hashResponse.data.state_hash;
+                        console.log('🔐 State hash actualizado');
                     }
-                });
-                
-                if (hashResponse.data.success) {
-                    lastHashRef.current = hashResponse.data.state_hash;
-                    console.log('🔐 State hash actualizado:', lastHashRef.current);
+                } catch (hashError) {
+                    console.log('⚠️ Error obteniendo state hash, continuando...');
                 }
                 
                 const newSections = Array(6).fill(null);
@@ -635,7 +715,8 @@ const TrabajosPanel = ({ user }) => {
                 headers: {
                     'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'
-                }
+                },
+                timeout: 8000
             });
 
             // Forzar actualización después de cambiar estado
@@ -682,7 +763,8 @@ const TrabajosPanel = ({ user }) => {
                     headers: {
                         'Authorization': `Bearer ${token}`,
                         'Content-Type': 'application/json'
-                    }
+                    },
+                    timeout: 10000
                 });
 
                 if (response.data.success) {
@@ -730,7 +812,8 @@ const TrabajosPanel = ({ user }) => {
                     headers: {
                         'Authorization': `Bearer ${token}`,
                         'Content-Type': 'application/json'
-                    }
+                    },
+                    timeout: 10000
                 });
 
                 if (response.data.success) {
@@ -836,6 +919,9 @@ const TrabajosPanel = ({ user }) => {
         return (
             <div className={`polling-status ${status.color}`}>
                 {status.text}
+                {errorCountRef.current > 0 && (
+                    <span className="error-count"> ({errorCountRef.current})</span>
+                )}
             </div>
         );
     };
@@ -849,8 +935,7 @@ const TrabajosPanel = ({ user }) => {
     }
 
     return (
-        <div className="dashboard-panel">
-            <PollingStatusIndicator />    
+        <div className="dashboard-panel">  
             <div className="trabajos-grid">
                 <div className="row rowcustom">
                     {[0, 1, 2].map(index => (

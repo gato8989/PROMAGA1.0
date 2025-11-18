@@ -44,6 +44,13 @@ class RoleSeeder extends Seeder
         ]);
 
         User::create([
+            'name' => 'Promaga',
+            'email' => 'Automotrizpromaga@gmail.com', 
+            'password' => Hash::make('Promaga22@'),
+            'role_id' => $tecnicoRole->id
+        ]);
+
+        User::create([
             'name' => 'Monitor Ejemplo',
             'email' => 'monitor@example.com', 
             'password' => Hash::make('password123'),

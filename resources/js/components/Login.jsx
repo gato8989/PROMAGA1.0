@@ -76,12 +76,6 @@ const Login = ({ onLogin }) => {
                         {loading ? 'Ingresando...' : 'Ingresar'}
                     </button>
                 </form>
-
-                <div className="demo-accounts">
-                    <h4>Cuentas de demostración:</h4>
-                    <p><strong>Admin:</strong> admin@example.com / password123</p>
-                    <p><strong>Técnico:</strong> tecnico@example.com / password123</p>
-                </div>
             </div>
         </div>
     );
