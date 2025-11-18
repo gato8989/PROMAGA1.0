@@ -133,7 +133,7 @@ const TrabajosPanel = ({ user }) => {
                 console.log('📊 Debug servidor:', response.data.debug);
                 
                 if (currentStateHash === null) {
-                    // Primera vez - inicializar
+                    // Primera vez - inicializar CON STATE_HASH, NO TIMESTAMP
                     console.log('📅 Inicializando state hash:', serverStateHash);
                     lastHashRef.current = serverStateHash;
                     setPollingStatus('active');
@@ -479,7 +479,7 @@ const TrabajosPanel = ({ user }) => {
         });
     };
 
-    // Cargar trabajos desde la API - ACTUALIZADA
+    // Cargar trabajos desde la API - CORREGIDA
     const fetchTrabajos = async () => {
         try {
             console.log('🔄 Cargando trabajos desde el servidor...');
@@ -497,7 +497,7 @@ const TrabajosPanel = ({ user }) => {
                 const trabajosFromAPI = response.data.data;
                 console.log('📥 Trabajos recibidos:', trabajosFromAPI.length);
                 
-                // Actualizar el state hash después de cargar
+                // Obtener el state_hash actualizado después de cargar los trabajos
                 const hashResponse = await axios.get(`/api/trabajos/last-update?t=${Date.now()}`, {
                     headers: {
                         'Authorization': `Bearer ${token}`,
@@ -529,7 +529,7 @@ const TrabajosPanel = ({ user }) => {
                     }
                 });
                 
-                console.log('🆕 Sections actualizadas:', newSections);
+                console.log('🆕 Sections actualizadas:', newSections.filter(s => s !== null).length, 'trabajos');
                 setSections(newSections);
             }
         } catch (error) {
