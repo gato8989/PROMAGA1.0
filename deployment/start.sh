@@ -8,10 +8,11 @@ sleep 5
 
 # Ejecutar migraciones
 echo "🗃️ Ejecutando migraciones..."
-php artisan migrate
+php artisan migrate --force
 
 # Ejecutar seeders
 echo "🌱 Ejecutando seeders..."
+
 
 # Optimizar Laravel
 echo "⚡ Optimizando aplicación..."
