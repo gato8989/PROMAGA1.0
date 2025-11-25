@@ -1228,6 +1228,8 @@ select:focus-visible {
 
 .subtrabajos-container {
     margin-bottom: 15px;
+    border-bottom: 2px solid hsla(0, 0%, 100%, .3);
+    padding: 6px 0;
 }
 
 /* Responsive */
@@ -2328,4 +2330,17 @@ datalist option:hover {
     border: none;
     border-radius: 4px;
     cursor: pointer;
+}
+
+
+.subtrabajo-info {
+    display: flex;
+    flex-direction: column;
+}
+
+.subtrabajo-usuario {
+    font-size: 0.8em;
+    color: #666;
+    font-style: italic;
+    margin-top: 2px;
 }

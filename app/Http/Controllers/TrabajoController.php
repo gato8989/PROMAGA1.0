@@ -99,7 +99,9 @@ class TrabajoController extends Controller
         try {
             Log::info('Actualizando subtrabajo:', [
                 'trabajo_id' => $id,
-                'data' => $request->all()
+                'data' => $request->all(),
+                'usuario_actual' => $request->user()->name,
+                'usuario_id' => $request->user()->id
             ]);
 
             $validated = $request->validate([
@@ -108,15 +110,54 @@ class TrabajoController extends Controller
             ]);
 
             $trabajo = Trabajo::findOrFail($id);
-            $trabajo->actualizarSubtrabajoEstado(
-                $validated['subtrabajo'], 
-                $validated['estado']
-            );
+            
+            // DEBUG: Verificar el estado actual
+            Log::info('Estado actual del trabajo:', [
+                'subtrabajos_estado' => $trabajo->subtrabajos_estado,
+                'subtrabajos_usuario' => $trabajo->subtrabajos_usuario,
+                'tipo_subtrabajos_usuario' => gettype($trabajo->subtrabajos_usuario)
+            ]);
+            
+            // Inicializar arrays si son null
+            $estados = $trabajo->subtrabajos_estado ?? [];
+            $usuarios = $trabajo->subtrabajos_usuario ?? [];
+            
+            // Asegurarse de que son arrays
+            if (!is_array($estados)) {
+                $estados = [];
+            }
+            if (!is_array($usuarios)) {
+                $usuarios = [];
+            }
+            
+            // Actualizar estado del subtrabajo
+            $estados[$validated['subtrabajo']] = $validated['estado'];
+            
+            // Registrar qué usuario hizo el cambio (solo cuando se marca como completado - verde)
+            if ($validated['estado'] === true) {
+                $usuarios[$validated['subtrabajo']] = $request->user()->name;
+                Log::info('Registrando usuario para subtrabajo:', [
+                    'subtrabajo' => $validated['subtrabajo'],
+                    'usuario' => $request->user()->name,
+                    'usuarios_actuales' => $usuarios
+                ]);
+            }
+            
+            $trabajo->update([
+                'subtrabajos_estado' => $estados,
+                'subtrabajos_usuario' => $usuarios
+            ]);
+
+            // Recargar el modelo para ver los cambios
+            $trabajo->refresh();
 
             Log::info('Subtrabajo actualizado exitosamente:', [
                 'trabajo_id' => $id,
                 'subtrabajo' => $validated['subtrabajo'],
-                'estado' => $validated['estado']
+                'estado' => $validated['estado'],
+                'usuario_registrado' => $validated['estado'] ? $request->user()->name : 'N/A',
+                'todos_los_usuarios' => $trabajo->subtrabajos_usuario,
+                'tipo_todos_los_usuarios' => gettype($trabajo->subtrabajos_usuario)
             ]);
 
             return response()->json([
@@ -127,29 +168,24 @@ class TrabajoController extends Controller
 
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             Log::error('Trabajo no encontrado:', ['id' => $id]);
-            
             return response()->json([
                 'success' => false,
                 'error' => 'Trabajo no encontrado'
             ], 404);
-            
         } catch (ValidationException $e) {
             Log::error('Error de validación en TrabajoController@updateSubtrabajo:', [
                 'errors' => $e->errors()
             ]);
-            
             return response()->json([
                 'success' => false,
                 'error' => 'Error de validación',
                 'errors' => $e->errors()
             ], 422);
-            
         } catch (\Exception $e) {
             Log::error('Error en TrabajoController@updateSubtrabajo:', [
                 'message' => $e->getMessage(),
                 'trace' => $e->getTraceAsString()
             ]);
-
             return response()->json([
                 'success' => false,
                 'error' => 'Error al actualizar subtrabajo',
@@ -158,6 +194,7 @@ class TrabajoController extends Controller
         }
     }
 
+    
     public function updateNotas(Request $request, $id)
     {
         try {
@@ -206,13 +243,48 @@ class TrabajoController extends Controller
     public function destroy(Request $request, $id)
     {
         try {
-            Log::info('Completando trabajo y moviendo a historial:', ['id' => $id, 'user' => $request->user()->name]);
+            Log::info('Completando trabajo y moviendo a historial:', [
+                'id' => $id, 
+                'user' => $request->user()->name
+            ]);
 
             $trabajo = Trabajo::findOrFail($id);
-            
+
             // Obtener la fecha y hora actual
             $fechaTerminado = now();
+
+            // Obtener TODOS los usuarios únicos que interactuaron con los subtrabajos
+            $usuariosUnicos = [];
+            if ($trabajo->subtrabajos_usuario && is_array($trabajo->subtrabajos_usuario)) {
+                $usuariosUnicos = array_values($trabajo->subtrabajos_usuario);
+                // Filtrar valores nulos o vacíos y obtener únicos
+                $usuariosUnicos = array_filter($usuariosUnicos, function($usuario) {
+                    return !empty($usuario) && is_string($usuario);
+                });
+                $usuariosUnicos = array_unique($usuariosUnicos);
+            }
             
+            Log::info('Usuarios encontrados en subtrabajos:', [
+                'usuarios' => $usuariosUnicos,
+                'total' => count($usuariosUnicos),
+                'subtrabajos_usuario' => $trabajo->subtrabajos_usuario
+            ]);
+
+            // Determinar qué mostrar en "Terminado por"
+            $usuarioTermino = $request->user()->name; // Por defecto, el usuario que termina
+            
+            // Si hay múltiples usuarios únicos, agregarlos al usuario que termina
+            if (count($usuariosUnicos) > 1) {
+                $usuariosTexto = implode(', ', $usuariosUnicos);
+                $usuarioTermino = "{$request->user()->name} (Colaboraron: {$usuariosTexto})";
+            } else if (count($usuariosUnicos) === 1) {
+                // Si solo hay un usuario y es diferente al que termina, mostrarlo
+                $primerUsuario = reset($usuariosUnicos);
+                if ($primerUsuario !== $request->user()->name) {
+                    $usuarioTermino = "{$request->user()->name} (Inició: {$primerUsuario})";
+                }
+            }
+
             // Crear registro en historial
             \App\Models\HistorialTrabajo::create([
                 'marca' => $trabajo->marca,
@@ -220,12 +292,13 @@ class TrabajoController extends Controller
                 'año' => $trabajo->año,
                 'trabajos' => $trabajo->trabajos,
                 'subtrabajos_estado' => $trabajo->subtrabajos_estado,
+                'subtrabajos_usuario' => $trabajo->subtrabajos_usuario,
                 'subtrabajos_seleccionados' => $trabajo->subtrabajos_seleccionados,
                 'fecha_ingreso' => $trabajo->fecha_ingreso,
                 'fecha_terminado' => $fechaTerminado->format('d/m/Y'),
-                'hora_terminado' => $fechaTerminado->format('H:i:s'), // NUEVO: Hora de terminado
-                'hora_creacion' => $trabajo->created_at ? $trabajo->created_at->format('H:i:s') : '00:00:00', // NUEVO: Hora de creación
-                'usuario_termino' => $request->user()->name,
+                'hora_terminado' => $fechaTerminado->format('H:i:s'),
+                'hora_creacion' => $trabajo->created_at ? $trabajo->created_at->format('H:i:s') : '00:00:00',
+                'usuario_termino' => $usuarioTermino,
                 'color' => $trabajo->color,
                 'notas' => $trabajo->notas
             ]);
@@ -235,7 +308,9 @@ class TrabajoController extends Controller
 
             Log::info('Trabajo completado y guardado en historial exitosamente:', [
                 'id' => $id,
-                'user' => $request->user()->name,
+                'user_termino' => $request->user()->name,
+                'usuarios_colaboradores' => $usuariosUnicos,
+                'usuario_termino_final' => $usuarioTermino,
                 'hora_terminado' => $fechaTerminado->format('H:i:s')
             ]);
 
@@ -246,23 +321,20 @@ class TrabajoController extends Controller
 
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             Log::error('Trabajo no encontrado para completar:', ['id' => $id]);
-            
             return response()->json([
                 'success' => false,
                 'error' => 'Trabajo no encontrado'
             ], 404);
-            
         } catch (\Exception $e) {
             Log::error('Error en TrabajoController@destroy:', [
                 'message' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
                 'file' => $e->getFile(),
-                'line' => $e->getLine()
+                'line' => $e->getLine(),
             ]);
-
             return response()->json([
                 'success' => false,
-                'error' => 'Error al completar trabajo: ' . $e->getMessage(),
+                'error' => 'Error al completar trabajo: '. $e->getMessage(),
                 'debug' => config('app.debug') ? $e->getMessage() : null
             ], 500);
         }

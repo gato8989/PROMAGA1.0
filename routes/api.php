@@ -9,12 +9,6 @@ use App\Http\Controllers\VehicleController;
 
 use App\Http\Controllers\SSEController;
 
-// Rutas SSE
-Route::get('/sse/trabajos', [SSEController::class, 'streamTrabajos']);
-Route::post('/sse/notify-change', [SSEController::class, 'notifyChange']);
-Route::get('/sse/status', [SSEController::class, 'status']);
-
-
 // Rutas para datos de vehículos
 Route::get('/vehicles/makes', [VehicleController::class, 'getMakes']);
 Route::get('/vehicles/years/{make}', [VehicleController::class, 'getYears']);
@@ -104,8 +98,6 @@ Route::middleware('auth:sanctum')->group(function () {
             ], 500);
         }
     });
-
-
 
     Route::put('/trabajos/{id}', [TrabajoController::class, 'update']);
     Route::get('/trabajos', [TrabajoController::class, 'index']);
@@ -202,6 +194,130 @@ Route::middleware('auth:sanctum')->group(function () {
             return response()->json([
                 'success' => false,
                 'error' => 'Error al cargar filtros: ' . $e->getMessage()
+            ], 500);
+        }
+    });
+
+    // NUEVA RUTA: Actualizar notas del historial
+    Route::put('/historial-trabajos/{id}', function ($id, Request $request) {
+        try {
+            \Illuminate\Support\Facades\Log::info('Actualizando notas del historial:', [
+                'id' => $id,
+                'notas_length' => strlen($request->notas ?? '')
+            ]);
+
+            $trabajo = \App\Models\HistorialTrabajo::findOrFail($id);
+            
+            // Validar que solo se envíen las notas
+            $validated = $request->validate([
+                'notas' => 'nullable|string|max:1000'
+            ]);
+
+            $trabajo->update(['notas' => $validated['notas']]);
+
+            \Illuminate\Support\Facades\Log::info('Notas del historial actualizadas exitosamente:', [
+                'id' => $id,
+                'notas_length' => strlen($validated['notas'] ?? '')
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'data' => $trabajo,
+                'message' => 'Notas actualizadas exitosamente'
+            ]);
+
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            \Illuminate\Support\Facades\Log::error('Trabajo no encontrado en historial para actualizar notas:', ['id' => $id]);
+            
+            return response()->json([
+                'success' => false,
+                'error' => 'Trabajo no encontrado en el historial'
+            ], 404);
+            
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            \Illuminate\Support\Facades\Log::error('Error de validación al actualizar notas del historial:', [
+                'id' => $id,
+                'errors' => $e->errors()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'error' => 'Error de validación',
+                'errors' => $e->errors()
+            ], 422);
+            
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('Error actualizando notas del historial:', [
+                'id' => $id,
+                'message' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'error' => 'Error al actualizar notas: ' . $e->getMessage()
+            ], 500);
+        }
+    });
+
+    // Ruta alternativa PATCH para notas del historial
+    Route::patch('/historial-trabajos/{id}', function ($id, Request $request) {
+        try {
+            \Illuminate\Support\Facades\Log::info('Actualizando notas del historial (PATCH):', [
+                'id' => $id,
+                'notas_length' => strlen($request->notas ?? '')
+            ]);
+
+            $trabajo = \App\Models\HistorialTrabajo::findOrFail($id);
+            
+            // Validar que solo se envíen las notas
+            $validated = $request->validate([
+                'notas' => 'nullable|string|max:1000'
+            ]);
+
+            $trabajo->update(['notas' => $validated['notas']]);
+
+            \Illuminate\Support\Facades\Log::info('Notas del historial actualizadas exitosamente (PATCH):', [
+                'id' => $id,
+                'notas_length' => strlen($validated['notas'] ?? '')
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'data' => $trabajo,
+                'message' => 'Notas actualizadas exitosamente'
+            ]);
+
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            \Illuminate\Support\Facades\Log::error('Trabajo no encontrado en historial para actualizar notas (PATCH):', ['id' => $id]);
+            
+            return response()->json([
+                'success' => false,
+                'error' => 'Trabajo no encontrado en el historial'
+            ], 404);
+            
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            \Illuminate\Support\Facades\Log::error('Error de validación al actualizar notas del historial (PATCH):', [
+                'id' => $id,
+                'errors' => $e->errors()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'error' => 'Error de validación',
+                'errors' => $e->errors()
+            ], 422);
+            
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('Error actualizando notas del historial (PATCH):', [
+                'id' => $id,
+                'message' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'error' => 'Error al actualizar notas: ' . $e->getMessage()
             ], 500);
         }
     });

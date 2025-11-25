@@ -16,11 +16,12 @@ class HistorialTrabajo extends Model
         'año',
         'trabajos',
         'subtrabajos_estado',
+        'subtrabajos_usuario', // Asegúrate de tener este campo
         'subtrabajos_seleccionados',
         'fecha_ingreso',
         'fecha_terminado',
-        'hora_terminado', // NUEVO
-        'hora_creacion', // NUEVO
+        'hora_terminado',
+        'hora_creacion',
         'usuario_termino',
         'color',
         'notas'
@@ -29,7 +30,8 @@ class HistorialTrabajo extends Model
     protected $casts = [
         'trabajos' => 'array',
         'subtrabajos_estado' => 'array',
-        'subtrabajos_seleccionados' => 'array' // NUEVO CAST
+        'subtrabajos_usuario' => 'array', // Este cast es crucial
+        'subtrabajos_seleccionados' => 'array'
     ];
 
     /**

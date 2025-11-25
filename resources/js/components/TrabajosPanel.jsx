@@ -62,7 +62,7 @@ const TrabajosPanel = ({ user }) => {
         trabajosAfinacion: [
             "Cambio de aceite", "Filtro de aceite", "Etiqueta", "Bujías", "Filtro de aire", 
             "Limpieza de cuerpo de aceleración", "Limpieza de inyectores", "Filtro de gasolina", 
-            "Escaneo", "Revisión de niveles","Reiniciar Servicio"
+            "Escaneo", "Revisión de niveles","Reiniciar Servicio","Revisión de suspensión"
         ],
         trabajosSuspension: [
             "Horquilla derecha", "Horquilla izquierda", "Buje grande", "Buje chico", 
@@ -70,7 +70,9 @@ const TrabajosPanel = ({ user }) => {
             "Tornillo estabilizador derecho", "Tornillo estabilizador izquierdo", 
             "Balero delantero derecho", "Balero delantero izquierdo", "Maza delantera derecha", 
             "Maza delantera izquierda", "Maza trasera derecha", "Maza trasera izquierda", 
-            "Flecha izquierda", "Flecha derecha", "Junta homocinética derecha", "Junta homocinética izquierda"
+            "Flecha izquierda", "Flecha derecha", "Junta homocinética derecha", "Junta homocinética izquierda", "Amortiguador Delantero Derecho",  
+            "Amortiguador Delantero Izquierdo","Amortiguador Trasero Derecho","Amortiguador Trasero Izquierdo","Base Amortiguador Delantera Derecha",
+            "Base Amortiguador Delantera Izquierda","Base Amortiguador Trasera Derecha","Base Amortiguador Trasera Izquierda" 
         ],
         trabajosFrenos: [
             "Balatas delanteras", "Rectificado de discos", "Regresar pistones", 
@@ -425,11 +427,19 @@ const TrabajosPanel = ({ user }) => {
         }));
     };
 
-    const handleAgregarTrabajoEdicion = () => {
-        setFormDataEditar(prev => ({
-            ...prev,
-            trabajos: [...prev.trabajos, '']
-        }));
+
+    // Función auxiliar para obtener subtrabajos
+    const obtenerSubtrabajosPorTipo = (tipoTrabajo) => {
+        switch(tipoTrabajo) {
+            case "Afinación":
+                return [...trabajosData.trabajosAfinacion];
+            case "Suspensión":
+                return [...trabajosData.trabajosSuspension];
+            case "Frenos":
+                return [...trabajosData.trabajosFrenos];
+            default:
+                return [];
+        }
     };
 
     const handleTrabajoEdicionChange = (index, value) => {
@@ -440,12 +450,28 @@ const TrabajosPanel = ({ user }) => {
         const nuevosSubtrabajos = { ...formDataEditar.subtrabajos_seleccionados };
         
         if (trabajoAnterior !== value) {
-            if (!nuevosSubtrabajos[value]) {
-                nuevosSubtrabajos[value] = [];
-            }
-            const existeTrabajoAnterior = nuevosTrabajos.includes(trabajoAnterior);
-            if (!existeTrabajoAnterior && trabajoAnterior in nuevosSubtrabajos) {
+            // Verificar si el trabajo anterior aún existe en otros índices
+            const trabajoAnteriorAunExiste = nuevosTrabajos.some((t, i) => i !== index && t === trabajoAnterior);
+            
+            // Eliminar el trabajo anterior si ya no existe en ningún índice
+            if (!trabajoAnteriorAunExiste && trabajoAnterior in nuevosSubtrabajos) {
                 delete nuevosSubtrabajos[trabajoAnterior];
+            }
+            
+            // Configurar comportamiento automático para trabajos específicos
+            if (["Afinación", "Suspensión", "Frenos"].includes(value)) {
+                if (value === "Afinación") {
+                    // AFINACIÓN y FRENOS: Marcar TODOS los subtrabajos automáticamente
+                    nuevosSubtrabajos[value] = obtenerSubtrabajosPorTipo(value);
+                }
+                if(value === "Frenos"){
+                    nuevosSubtrabajos[value] = obtenerSubtrabajosPorTipo(value);
+                } else {
+                    // SUSPENSIÓN NO marcar ningún subtrabajo
+                    nuevosSubtrabajos[value] = [];
+                }
+            } else if (value.trim() !== "" && !(value in nuevosSubtrabajos)) {
+                nuevosSubtrabajos[value] = [];
             }
         }
         
@@ -456,11 +482,19 @@ const TrabajosPanel = ({ user }) => {
         }));
     };
 
+    const handleAgregarTrabajoEdicion = () => {
+        setFormDataEditar(prev => ({
+            ...prev,
+            trabajos: [...prev.trabajos, ''] 
+        }));
+    };
+
     const handleEliminarTrabajoEdicion = (index) => {
         const trabajoAEliminar = formDataEditar.trabajos[index];
         const nuevosTrabajos = formDataEditar.trabajos.filter((_, i) => i !== index);
         const nuevosSubtrabajos = { ...formDataEditar.subtrabajos_seleccionados };
         
+        // Verificar si el trabajo eliminado aún existe en otros índices
         const existeTrabajo = nuevosTrabajos.includes(trabajoAEliminar);
         if (!existeTrabajo && trabajoAEliminar in nuevosSubtrabajos) {
             delete nuevosSubtrabajos[trabajoAEliminar];
@@ -704,9 +738,26 @@ const TrabajosPanel = ({ user }) => {
             }
         });
     };
-
+    
+    // FUNCIÓN ACTUALIZADA: Incluye información del usuario
     const handleSubtrabajoEstadoChange = async (trabajoId, subtrabajo, isGreen) => {
         try {
+            // ACTUALIZAR ESTADO LOCAL INMEDIATAMENTE
+            setSections(prevSections => {
+                return prevSections.map(section => {
+                    if (section && section.id === trabajoId) {
+                        return {
+                            ...section,
+                            subtrabajosEstado: {
+                                ...section.subtrabajosEstado,
+                                [subtrabajo]: isGreen
+                            }
+                        };
+                    }
+                    return section;
+                });
+            });
+
             const token = localStorage.getItem('token');
             await axios.put(`/api/trabajos/${trabajoId}/subtrabajo`, {
                 subtrabajo: subtrabajo,
@@ -719,11 +770,27 @@ const TrabajosPanel = ({ user }) => {
                 timeout: 8000
             });
 
-            // Forzar actualización después de cambiar estado
-            setForceRefresh(prev => prev + 1);
+            console.log(`✅ Estado cambiado a ${isGreen ? 'verde' : 'rojo'} por ${user.name}, el polling se encargará de la sincronización`);
 
         } catch (error) {
             console.error('Error actualizando subtrabajo:', error);
+            
+            // REVERTIR EL CAMBIO EN CASO DE ERROR
+            setSections(prevSections => {
+                return prevSections.map(section => {
+                    if (section && section.id === trabajoId) {
+                        return {
+                            ...section,
+                            subtrabajosEstado: {
+                                ...section.subtrabajosEstado,
+                                [subtrabajo]: !isGreen // Revertir al estado anterior
+                            }
+                        };
+                    }
+                    return section;
+                });
+            });
+            
             alert('Error al actualizar el estado del trabajo');
         }
     };
@@ -1246,17 +1313,24 @@ const TrabajoPopup = ({
                                 type="text"
                                 id="año"
                                 value={formData.año}
-                                onChange={(e) => onInputChange('año', e.target.value)}
+                                onChange={(e) => {
+                                    // Filtrar solo números
+                                    const soloNumeros = e.target.value.replace(/[^0-9]/g, '');
+                                    onInputChange('año', soloNumeros);
+                                }}
                                 list="años-lista"
-                                placeholder="Escribe o selecciona un año"
+                                placeholder="Selecciona o escribe un año"
                                 required
                                 disabled={!formData.marca || loadingAños}
                                 className="custom-select"
+                                maxLength="4" // Limitar a 4 dígitos para años
+                                pattern="[0-9]*"
+                                inputMode="numeric" 
                             />
                             <datalist id="años-lista">
                                 <option value="">
                                     {loadingAños ? '🔄 Cargando años...' : 
-                                     !formData.marca ? 'Primero selecciona una marca' : 'Elige un año...'}
+                                    !formData.marca ? 'Primero selecciona una marca' : 'Elige un año...'}
                                 </option>
                                 {añosData.map((año, index) => (
                                     <option key={index} value={año}>
@@ -1510,9 +1584,17 @@ const EditarPopup = ({
                                     type="text"
                                     id="editar-año"
                                     value={formData.año}
-                                    onChange={(e) => onInputChange('año', e.target.value)}
+                                    onChange={(e) => {
+                                        // Filtrar solo números
+                                        const soloNumeros = e.target.value.replace(/[^0-9]/g, '');
+                                        onInputChange('año', soloNumeros);
+                                    }}
                                     required
                                     className="custom-select"
+                                    maxLength="4"
+                                    pattern="[0-9]*"
+                                    inputMode="numeric"
+                                    placeholder="Año"
                                 />
                             </div>
                         </div>
