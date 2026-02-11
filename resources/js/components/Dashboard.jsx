@@ -132,9 +132,6 @@ const Dashboard = ({ user, onLogout, sidebarOpen, onSidebarHover, onSidebarToggl
                             <div className="current-time">
                                 {formatTime(currentTime)}
                             </div>
-                            <div className="time-timezone">
-                                Hora Local
-                            </div>
                         </div>
                     </div>
                 </header>

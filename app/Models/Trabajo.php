@@ -16,7 +16,7 @@ class Trabajo extends Model
         'año',
         'trabajos',
         'subtrabajos_estado',
-        'subtrabajos_usuario', // Asegúrate de agregar este campo
+        'subtrabajos_usuario', 
         'subtrabajos_seleccionados',
         'fecha_ingreso',
         'color',
@@ -27,14 +27,14 @@ class Trabajo extends Model
     protected $casts = [
         'trabajos' => 'array',
         'subtrabajos_estado' => 'array',
-        'subtrabajos_usuario' => 'array', // Este cast es crucial
+        'subtrabajos_usuario' => 'array', 
         'subtrabajos_seleccionados' => 'array',
         'completado' => 'boolean'
     ];
 
     protected $attributes = [
         'subtrabajos_estado' => '{}',
-        'subtrabajos_usuario' => '{}', // Agregar valor por defecto
+        'subtrabajos_usuario' => '{}',
         'subtrabajos_seleccionados' => '{}',
         'color' => '#261472',
         'completado' => false
@@ -42,7 +42,7 @@ class Trabajo extends Model
 
 
     /**
-     * Obtener trabajos activos (no completados)
+     * Obtener trabajos activos 
      */
     public static function getActivos()
     {

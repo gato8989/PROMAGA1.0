@@ -281,7 +281,7 @@ class TrabajoController extends Controller
                 // Si solo hay un usuario y es diferente al que termina, mostrarlo
                 $primerUsuario = reset($usuariosUnicos);
                 if ($primerUsuario !== $request->user()->name) {
-                    $usuarioTermino = "{$request->user()->name} (Inició: {$primerUsuario})";
+                    $usuarioTermino = "{$request->user()->name} (Realizado por: {$primerUsuario})";
                 }
             }
 

@@ -12,7 +12,7 @@ const TrabajosPanel = ({ user }) => {
     const [apiStatus, setApiStatus] = useState('checking');
 
     // Estados principales
-    const [sections, setSections] = useState(Array(6).fill(null));
+    const [sections, setSections] = useState(Array(9).fill(null));
     const [showPopup, setShowPopup] = useState(false);
     const [currentSection, setCurrentSection] = useState(null);
     const [formData, setFormData] = useState({
@@ -65,14 +65,13 @@ const TrabajosPanel = ({ user }) => {
             "Escaneo", "Revisión de niveles","Reiniciar Servicio","Revisión de suspensión"
         ],
         trabajosSuspension: [
-            "Horquilla derecha", "Horquilla izquierda", "Buje grande", "Buje chico", 
-            "Rotula derecha", "Rotula izquierda", "Terminal derecha", "Terminal izquierda", 
-            "Tornillo estabilizador derecho", "Tornillo estabilizador izquierdo", 
-            "Balero delantero derecho", "Balero delantero izquierdo", "Maza delantera derecha", 
-            "Maza delantera izquierda", "Maza trasera derecha", "Maza trasera izquierda", 
-            "Flecha izquierda", "Flecha derecha", "Junta homocinética derecha", "Junta homocinética izquierda", "Amortiguador Delantero Derecho",  
-            "Amortiguador Delantero Izquierdo","Amortiguador Trasero Derecho","Amortiguador Trasero Izquierdo","Base Amortiguador Delantera Derecha",
-            "Base Amortiguador Delantera Izquierda","Base Amortiguador Trasera Derecha","Base Amortiguador Trasera Izquierda" 
+            "Amortiguador Delantero Derecho", "Amortiguador Delantero Izquierdo", "Amortiguador Trasero Derecho", "Amortiguador Trasero Izquierdo", 
+            "Balero delantero derecho", "Balero delantero izquierdo", "Balero trasero derecho", "Baleto trasero izquierdo", "Base Amortiguador Delantera Derecha", "Base Amortiguador Delantera Izquierda", 
+            "Base Amortiguador Trasera Derecha", "Base Amortiguador Trasera Izquierda", "Bieleta Derecha", "Bieleta izquierda", "Bujes chicos", "Bujes grandes", 
+            "Flecha derecha", "Flecha izquierda", "Gomas de la barra delanterar", "Gomas de la barra traseras", "Horquilla derecha", "Horquilla izquierda", 
+            "Junta homocinética derecha", "Junta homocinética izquierda", "Maza delantera derecha", "Maza delantera izquierda", "Maza trasera derecha", 
+            "Maza trasera izquierda", "Rotula derecha", "Rotula izquierda", "Terminal derecha", "Terminal izquierda", "Tornillo estabilizador derecho", 
+            "Tornillo estabilizador izquierdo"
         ],
         trabajosFrenos: [
             "Balatas delanteras", "Rectificado de discos", "Regresar pistones", 
@@ -624,10 +623,10 @@ const TrabajosPanel = ({ user }) => {
                     console.log('⚠️ Error obteniendo state hash, continuando...');
                 }
                 
-                const newSections = Array(6).fill(null);
+                const newSections = Array(9).fill(null);
                 
                 trabajosFromAPI.forEach((trabajo, index) => {
-                    if (index < 6) {
+                    if (index < 9) {
                         newSections[index] = {
                             id: trabajo.id,
                             marca: trabajo.marca,
@@ -1038,6 +1037,23 @@ const TrabajosPanel = ({ user }) => {
                         />
                     ))}
                 </div>
+                <div className="row rowcustom">
+                    {[6, 7, 8].map(index => (
+                        <TrabajoSection 
+                            key={index}
+                            index={index}
+                            data={sections[index]}
+                            showAddButton={index === addButtonPosition}
+                            onAddTrabajo={handleAddTrabajo}
+                            onTerminarTrabajo={handleTerminarTrabajo}
+                            onAbrirNotas={handleAbrirNotas}
+                            onAbrirEdicion={handleAbrirEdicion}
+                            renderSubtrabajos={renderSubtrabajos}
+                            canTerminar={canTerminarTrabajos()}
+                            isAdmin={isAdmin()}
+                        />
+                    ))}
+                </div>
             </div>
 
             {showPopup && (
@@ -1274,12 +1290,6 @@ const TrabajoPopup = ({
             <div className="popup">
                 <div className="popup-content">
                     <h2>Añadir Vehículo</h2>
-                    
-                    {apiStatus !== 'online' && (
-                        <div className="api-warning">
-                            ⚠️ Usando datos locales - Algunas opciones pueden estar limitadas
-                        </div>
-                    )}
                     
                     <form onSubmit={onSubmit}>
                         <div className="form-group">

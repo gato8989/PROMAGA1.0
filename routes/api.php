@@ -6,7 +6,6 @@ use App\Http\Controllers\AuthController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\TrabajoController;
 use App\Http\Controllers\VehicleController;
-
 use App\Http\Controllers\SSEController;
 
 // Rutas para datos de vehículos
@@ -20,7 +19,7 @@ Route::post('/vehicles/refresh-cache', [VehicleController::class, 'refreshCache'
 // Rutas públicas
 Route::post('/login', [AuthController::class, 'login']);
 
-// Rutas protegidas con Sanctum - NO usar middleware 'auth'
+// Rutas protegidas con Sanctum 
 Route::middleware('auth:sanctum')->group(function () {
     // Auth routes
     Route::post('/logout', [AuthController::class, 'logout']);
@@ -106,14 +105,18 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('/trabajos/{trabajo}/notas', [TrabajoController::class, 'updateNotas']); 
     Route::delete('/trabajos/{id}', [TrabajoController::class, 'destroy']);
 
-    // Historial routes - USANDO CLOSURES TEMPORALMENTE
+    // historial trabajos
     Route::get('/historial-trabajos', function (Request $request) {
         try {
-            \Illuminate\Support\Facades\Log::info('Solicitando historial de trabajos via closure', ['filtros' => $request->all()]);
+            \Illuminate\Support\Facades\Log::info('Solicitando historial de trabajos via closure', [
+                'filtros' => $request->all(),
+                'page' => $request->page ?? 1,
+                'per_page' => $request->per_page ?? 10
+            ]);
 
             $query = \App\Models\HistorialTrabajo::query();
 
-            // Aplicar filtros
+            // Aplicar filtros individuales
             if ($request->has('fecha') && $request->fecha) {
                 $query->where('fecha_terminado', $request->fecha);
             }
@@ -126,27 +129,74 @@ Route::middleware('auth:sanctum')->group(function () {
                 $query->where('modelo', 'like', "%{$request->modelo}%");
             }
 
+            // FILTRO MEJORADO: Búsqueda inteligente
             if ($request->has('busqueda') && $request->busqueda) {
-                $query->where(function($q) use ($request) {
-                    $q->where('marca', 'like', "%{$request->busqueda}%")
-                      ->orWhere('modelo', 'like', "%{$request->busqueda}%")
-                      ->orWhere('año', 'like', "%{$request->busqueda}%");
+                $terminos = preg_split('/\s+/', trim($request->busqueda));
+                
+                $query->where(function($q) use ($terminos) {
+                    foreach ($terminos as $termino) {
+                        // Limpiar el término de búsqueda
+                        $terminoLimpio = trim($termino);
+                        if (empty($terminoLimpio)) continue;
+                        
+                        // Buscar en marca, modelo y año
+                        $q->where(function($subQuery) use ($terminoLimpio) {
+                            $subQuery->where('marca', 'like', "%{$terminoLimpio}%")
+                                    ->orWhere('modelo', 'like', "%{$terminoLimpio}%")
+                                    ->orWhere('año', 'like', "%{$terminoLimpio}%");
+                        });
+                    }
                 });
             }
 
-            if ($request->has('fecha_inicio') && $request->fecha_inicio && 
-                $request->has('fecha_fin') && $request->fecha_fin) {
-                $query->whereBetween('fecha_terminado', [$request->fecha_inicio, $request->fecha_fin]);
+            // FILTRO CORREGIDO: Manejar fechas como strings en formato d/m/Y
+            if ($request->has('fecha_inicio') && $request->fecha_inicio) {
+                // Convertir fecha de YYYY-MM-DD a DD/MM/YYYY
+                $fechaInicio = \Carbon\Carbon::parse($request->fecha_inicio)->format('d/m/Y');
+                $query->whereRaw("STR_TO_DATE(fecha_terminado, '%d/%m/%Y') >= STR_TO_DATE(?, '%d/%m/%Y')", [$fechaInicio]);
             }
 
-            $trabajos = $query->orderBy('created_at', 'desc')->get();
+            if ($request->has('fecha_fin') && $request->fecha_fin) {
+                // Convertir fecha de YYYY-MM-DD a DD/MM/YYYY
+                $fechaFin = \Carbon\Carbon::parse($request->fecha_fin)->format('d/m/Y');
+                $query->whereRaw("STR_TO_DATE(fecha_terminado, '%d/%m/%Y') <= STR_TO_DATE(?, '%d/%m/%Y')", [$fechaFin]);
+            }
 
-            \Illuminate\Support\Facades\Log::info('Historial cargado exitosamente via closure', ['count' => $trabajos->count()]);
+            // Obtener el total antes de paginar (para el frontend)
+            $total = $query->count();
+            
+            // Aplicar paginación
+            $page = $request->page ?? 1;
+            $perPage = $request->per_page ?? 10;
+            $offset = ($page - 1) * $perPage;
+            
+            $query->orderBy('created_at', 'desc')
+                ->skip($offset)
+                ->take($perPage);
+                
+            $trabajos = $query->get();
+
+            \Illuminate\Support\Facades\Log::info('Historial cargado exitosamente via closure', [
+                'count' => $trabajos->count(),
+                'total' => $total,
+                'page' => $page,
+                'per_page' => $perPage,
+                'filtros_aplicados' => [
+                    'busqueda_terminos' => $request->busqueda ? preg_split('/\s+/', trim($request->busqueda)) : [],
+                    'fecha_inicio' => $request->fecha_inicio ? \Carbon\Carbon::parse($request->fecha_inicio)->format('d/m/Y') : null,
+                    'fecha_fin' => $request->fecha_fin ? \Carbon\Carbon::parse($request->fecha_fin)->format('d/m/Y') : null,
+                    'marca' => $request->marca,
+                    'modelo' => $request->modelo
+                ]
+            ]);
 
             return response()->json([
                 'success' => true,
                 'data' => $trabajos,
-                'total' => $trabajos->count()
+                'total' => $total,
+                'page' => (int)$page,
+                'per_page' => (int)$perPage,
+                'has_more' => ($offset + $trabajos->count()) < $total
             ]);
 
         } catch (\Exception $e) {

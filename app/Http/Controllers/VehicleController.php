@@ -9,15 +9,61 @@ use Illuminate\Support\Facades\Log;
 class VehicleController extends Controller
 {
     private $nhtsaBaseUrl = 'https://vpic.nhtsa.dot.gov/api/vehicles';
+    private $apiAvailable = true;
+
+    /**
+     * Constructor - Verificar disponibilidad de API al inicio
+     */
+    public function __construct()
+    {
+        $this->checkApiAvailability();
+    }
+
+    /**
+     * Verificar si la API está disponible
+     */
+    private function checkApiAvailability()
+    {
+        try {
+            // Verificar cache primero
+            $cacheKey = 'nhtsa_api_available';
+            $cachedAvailability = Cache::get($cacheKey);
+            
+            if ($cachedAvailability !== null) {
+                $this->apiAvailable = $cachedAvailability;
+                return;
+            }
+            
+            // Intentar conexión simple con timeout corto
+            $response = Http::timeout(5)
+                ->connectTimeout(3)
+                ->get("{$this->nhtsaBaseUrl}/getallmakes?format=json");
+            
+            $this->apiAvailable = $response->successful();
+            
+            // Cachear resultado por 5 minutos
+            Cache::put($cacheKey, $this->apiAvailable, 300);
+            
+        } catch (\Exception $e) {
+            $this->apiAvailable = false;
+            Cache::put($cacheKey, false, 300);
+            Log::warning('NHTSA API no disponible: ' . $e->getMessage());
+        }
+    }
 
     /**
      * Configuración segura para HTTP client
      */
     private function makeNhtsaRequest($url)
     {
+        // Si sabemos que la API no está disponible, no intentar
+        if (!$this->apiAvailable) {
+            return null;
+        }
+
         $options = [
-            'timeout' => 15,
-            'connect_timeout' => 10,
+            'timeout' => 10,
+            'connect_timeout' => 5,
         ];
 
         // Solo deshabilitar SSL verification en desarrollo local
@@ -27,202 +73,95 @@ class VehicleController extends Controller
 
         try {
             return Http::withOptions($options)
-                ->retry(3, 1000)
+                ->retry(2, 500) // Solo 2 reintentos rápidos
                 ->get($url);
         } catch (\Exception $e) {
-            Log::error("NHTSA Request failed for URL: {$url} - Error: " . $e->getMessage());
+            Log::warning("NHTSA Request failed: " . $e->getMessage());
+            
+            // Marcar API como no disponible temporalmente
+            Cache::put('nhtsa_api_available', false, 60); // 1 minuto
+            
             return null;
         }
     }
 
     /**
-     * Obtener todas las marcas de vehículos - FILTRADO PARA MÉXICO
+     * Obtener todas las marcas de vehículos - CON FALLBACK AUTOMÁTICO
      */
     public function getMakes()
     {
-        return Cache::remember('nhtsa_vehicle_makes_mexico', 604800, function () {
-            $response = $this->makeNhtsaRequest("{$this->nhtsaBaseUrl}/getallmakes?format=json");
-            
-            if ($response && $response->successful()) {
-                $data = $response->json();
+        $cacheKey = 'nhtsa_vehicle_makes_mexico';
+        $cacheDuration = 604800; // 1 semana
+        
+        return Cache::remember($cacheKey, $cacheDuration, function () {
+            // Primero intentar con API
+            if ($this->apiAvailable) {
+                $response = $this->makeNhtsaRequest("{$this->nhtsaBaseUrl}/getallmakes?format=json");
                 
-                if (isset($data['Results']) && count($data['Results']) > 0) {
-                    // Primero obtener todas las marcas
-                    $allMakes = collect($data['Results'])
-                        ->pluck('Make_Name')
-                        ->unique()
-                        ->sort()
-                        ->values()
-                        ->toArray();
+                if ($response && $response->successful()) {
+                    $data = $response->json();
                     
-                    Log::info('Total marcas from NHTSA API', ['count' => count($allMakes)]);
-                    
-                    // Filtrar para marcas disponibles en México
-                    $mexicoMakes = $this->filterMakesForMexico($allMakes);
-                    
-                    Log::info('Marcas filtradas para México', [
-                        'total' => count($allMakes),
-                        'filtradas' => count($mexicoMakes)
-                    ]);
-                    
-                    return response()->json([
-                        'success' => true,
-                        'data' => $mexicoMakes,
-                        'source' => 'nhtsa_filtered',
-                        'count' => count($mexicoMakes),
-                        'note' => 'Marcas filtradas para mercado mexicano'
-                    ]);
-                }
-            }
-            
-            // Si falla la API, usar datos de respaldo ya filtrados
-            Log::info('Using filtered backup makes data for Mexico');
-            return $this->getBackupMakes();
-        });
-    }
-
-    /**
-     * Filtrar marcas para el mercado mexicano
-     */
-    private function filterMakesForMexico($allMakes)
-    {
-        // Marcas principales disponibles en México (basado en popularidad y presencia)
-        $mexicoBrands = [
-            // Marcas Japonesas (muy populares en México)
-            'TOYOTA', 'HONDA', 'NISSAN', 'MAZDA', 'SUBARU', 'MITSUBISHI', 'SUZUKI', 'ISUZU',
-            
-            // Marcas Americanas
-            'FORD', 'CHEVROLET', 'DODGE', 'JEEP', 'CHRYSLER', 'GMC', 'BUICK', 'CADILLAC', 'LINCOLN', 'RAM',
-            
-            // Marcas Coreanas
-            'HYUNDAI', 'KIA', 
-            
-            // Marcas Europeas (comunes en México)
-            'VOLKSWAGEN', 'BMW', 'MERCEDES-BENZ', 'AUDI', 'VOLVO', 'RENAULT', 'PEUGEOT', 
-            'CITROEN', 'FIAT', 'SEAT', 'SKODA', 'MINI', 'PORSCHE', 'JAGUAR', 'LAND ROVER',
-            
-            // Marcas de lujo (presentes en México)
-            'LEXUS', 'ACURA', 'INFINITI', 
-            
-            // Marcas Chinas (que están entrando al mercado mexicano)
-            'MG', 'CHANGAN', 'JAC', 'BAIC', 'BRILLIANCE', 'GEELY',
-            
-            // Marcas de volumen bajo o especializadas
-            'ALFA ROMEO', 'MASERATI', 'FERRARI', 'LAMBORGHINI', 'BENTLEY', 'ROLLS-ROYCE',
-            'ASTON MARTIN', 'MCLAREN', 'LOTUS'
-        ];
-        
-        // Convertir a mayúsculas para comparación case-insensitive
-        $mexicoBrandsUpper = array_map('strtoupper', $mexicoBrands);
-        
-        // Filtrar marcas que están en nuestra lista de México
-        $filteredMakes = array_filter($allMakes, function($make) use ($mexicoBrandsUpper) {
-            $makeUpper = strtoupper($make);
-            return in_array($makeUpper, $mexicoBrandsUpper);
-        });
-        
-        // Si no encontramos suficientes marcas, usar nuestra lista predefinida
-        if (count($filteredMakes) < 20) {
-            Log::warning('Few brands found for Mexico, using predefined list', [
-                'found' => count($filteredMakes),
-                'expected' => count($mexicoBrands)
-            ]);
-            return $this->getPriorityMexicoMakes();
-        }
-        
-        // Ordenar alfabéticamente
-        sort($filteredMakes);
-        
-        return array_values($filteredMakes);
-    }
-
-    /**
-     * Lista prioritaria de marcas para México (ordenadas por popularidad)
-     */
-    private function getPriorityMexicoMakes()
-    {
-        // Marcas ordenadas por popularidad en México
-        $priorityMakes = [
-            // Nivel 1: Marcas más populares y vendidas
-            "NISSAN", "TOYOTA", "VOLKSWAGEN", "CHEVROLET", "FORD", "HYUNDAI", "KIA", "HONDA",
-            
-            // Nivel 2: Marcas con buena presencia
-            "MAZDA", "BMW", "MERCEDES-BENZ", "AUDI", "MITSUBISHI", "SUBARU",
-            
-            // Nivel 3: Marcas de lujo y especializadas
-            "LEXUS", "VOLVO", "PORSCHE", "LAND ROVER", "JAGUAR", "MINI", "ACURA", "INFINITI",
-            
-            // Nivel 4: Otras marcas disponibles
-            "DODGE", "CHRYSLER", "RAM", "GMC", "BUICK", "CADILLAC", "LINCOLN", "FIAT", "RENAULT", 
-            "PEUGEOT", "CITROEN", "SEAT", "SKODA", "SUZUKI", "ISUZU",
-            
-            // Nivel 5: Marcas chinas emergentes
-            "MG", "CHANGAN", "JAC"
-        ];
-        
-        // Eliminar duplicados y ordenar
-        $priorityMakes = array_unique($priorityMakes);
-        sort($priorityMakes);
-        
-        return $priorityMakes;
-    }
-
-    /**
-     * Obtener años para una marca específica - VERSIÓN CORREGIDA
-     */
-    public function getYears($make)
-    {
-        $cacheKey = "nhtsa_vehicle_years_" . md5($make);
-        
-        return Cache::remember($cacheKey, 604800, function () use ($make) {
-            Log::info("Fetching years for make: {$make}");
-            
-            // Convertir a mayúsculas para la API NHTSA
-            $makeForApi = strtoupper($make);
-            
-            // Primero intentar con el nombre en mayúsculas
-            $response = $this->makeNhtsaRequest("{$this->nhtsaBaseUrl}/GetModelsForMake/{$makeForApi}?format=json");
-            
-            if ($response && $response->successful()) {
-                $data = $response->json();
-                Log::info("NHTSA API Response Status: " . $response->status());
-                Log::info("NHTSA API Data Received", ['results_count' => count($data['Results'] ?? [])]);
-                
-                if (isset($data['Results']) && count($data['Results']) > 0) {
-                    $years = collect($data['Results'])
-                        ->pluck('Model_Year')
-                        ->unique()
-                        ->filter(function ($year) {
-                            $isValid = is_numeric($year) && $year >= 1990 && $year <= date('Y') + 1;
-                            return $isValid;
-                        })
-                        ->sortDesc()
-                        ->values()
-                        ->toArray();
-                    
-                    if (!empty($years)) {
-                        Log::info("Successfully processed years for {$makeForApi}", [
-                            'count' => count($years),
-                            'years_sample' => array_slice($years, 0, 5)
-                        ]);
+                    if (isset($data['Results']) && count($data['Results']) > 0) {
+                        $allMakes = collect($data['Results'])
+                            ->pluck('Make_Name')
+                            ->unique()
+                            ->sort()
+                            ->values()
+                            ->toArray();
                         
-                        return response()->json([
-                            'success' => true,
-                            'data' => $years,
-                            'source' => 'nhtsa',
-                            'count' => count($years)
-                        ]);
+                        $mexicoMakes = $this->filterMakesForMexico($allMakes);
+                        
+                        if (!empty($mexicoMakes)) {
+                            Log::info('Marcas obtenidas de API NHTSA', ['count' => count($mexicoMakes)]);
+                            return response()->json([
+                                'success' => true,
+                                'data' => $mexicoMakes,
+                                'source' => 'nhtsa_filtered',
+                                'api_available' => true
+                            ]);
+                        }
                     }
                 }
             }
             
-            // Si falla, intentar con nombres alternativos
-            $alternativeMakes = $this->getAlternativeMakeNames($make);
+            // Si llegamos aquí, usar datos de respaldo
+            Log::info('Usando datos de respaldo para marcas');
+            return $this->getBackupMakesResponse();
+        });
+    }
+
+    /**
+     * Respuesta de respaldo para marcas
+     */
+    private function getBackupMakesResponse()
+    {
+        $makes = $this->getPriorityMexicoMakes();
+        
+        return response()->json([
+            'success' => true,
+            'data' => $makes,
+            'source' => 'backup',
+            'api_available' => false,
+            'count' => count($makes),
+            'note' => 'Datos de respaldo - API no disponible'
+        ]);
+    }
+
+    /**
+     * Obtener años para una marca específica - CON FALLBACK
+     */
+    public function getYears($make)
+    {
+        $cacheKey = "nhtsa_vehicle_years_" . md5($make);
+        $cacheDuration = 604800;
+        
+        return Cache::remember($cacheKey, $cacheDuration, function () use ($make) {
+            Log::info("Fetching years for make: {$make}");
             
-            foreach ($alternativeMakes as $alternativeMake) {
-                Log::info("Trying alternative make name: {$alternativeMake}");
-                
-                $response = $this->makeNhtsaRequest("{$this->nhtsaBaseUrl}/GetModelsForMake/{$alternativeMake}?format=json");
+            // Primero intentar con API
+            if ($this->apiAvailable) {
+                $makeForApi = strtoupper($make);
+                $response = $this->makeNhtsaRequest("{$this->nhtsaBaseUrl}/GetModelsForMake/{$makeForApi}?format=json");
                 
                 if ($response && $response->successful()) {
                     $data = $response->json();
@@ -239,134 +178,59 @@ class VehicleController extends Controller
                             ->toArray();
                         
                         if (!empty($years)) {
-                            Log::info("Successfully processed years using alternative name", [
-                                'original' => $make,
-                                'alternative' => $alternativeMake,
-                                'count' => count($years)
-                            ]);
-                            
+                            Log::info("Años obtenidos de API", ['count' => count($years)]);
                             return response()->json([
                                 'success' => true,
                                 'data' => $years,
-                                'source' => 'nhtsa_alternative',
-                                'count' => count($years),
-                                'note' => "Usando nombre alternativo: {$alternativeMake}"
+                                'source' => 'nhtsa',
+                                'api_available' => true
                             ]);
                         }
                     }
                 }
             }
             
-            // Si todo falla, usar datos de respaldo
-            Log::warning("All attempts failed for make: {$make}, using backup data");
-            return $this->getBackupYears();
+            // Fallback a datos locales
+            Log::info("Usando datos de respaldo para años de: {$make}");
+            return $this->getBackupYearsResponse();
         });
     }
 
     /**
-     * Obtener nombres alternativos para una marca (en mayúsculas para NHTSA)
+     * Respuesta de respaldo para años
      */
-    private function getAlternativeMakeNames($make)
+    private function getBackupYearsResponse()
     {
-        $makeUpper = strtoupper($make);
+        $currentYear = date('Y');
+        $years = range($currentYear, $currentYear - 30);
+        $years = array_map('strval', $years);
         
-        $alternatives = [
-            'GENERAL MOTORS' => ['GM', 'CHEVROLET', 'GMC', 'BUICK', 'CADILLAC'],
-            'MERCEDES-BENZ' => ['MERCEDES'],
-            'ALFA ROMEO' => ['ALFA'],
-            'LAND ROVER' => ['LANDROVER'],
-            'ASTON MARTIN' => ['ASTON'],
-            'ROLLS-ROYCE' => ['ROLLSROYCE'],
-            'MAZDA' => ['MAZDA'],
-            'TOYOTA' => ['TOYOTA'],
-            'HONDA' => ['HONDA'],
-            'NISSAN' => ['NISSAN'],
-            'FORD' => ['FORD'],
-            'CHEVROLET' => ['CHEVROLET', 'GM'],
-            'VOLKSWAGEN' => ['VOLKSWAGEN'],
-            'BMW' => ['BMW'],
-            'AUDI' => ['AUDI'],
-            'HYUNDAI' => ['HYUNDAI'],
-            'KIA' => ['KIA'],
-            'LEXUS' => ['LEXUS'],
-            'VOLVO' => ['VOLVO'],
-            'PORSCHE' => ['PORSCHE'],
-            'JEEP' => ['JEEP'],
-            'SUBARU' => ['SUBARU'],
-            'MITSUBISHI' => ['MITSUBISHI'],
-            'ACURA' => ['ACURA'],
-            'INFINITI' => ['INFINITI'],
-            'DODGE' => ['DODGE'],
-            'CHRYSLER' => ['CHRYSLER'],
-            'RAM' => ['RAM'],
-            'GMC' => ['GMC'],
-            'BUICK' => ['BUICK'],
-            'CADILLAC' => ['CADILLAC'],
-            'LINCOLN' => ['LINCOLN'],
-            'FIAT' => ['FIAT'],
-            'RENAULT' => ['RENAULT'],
-            'PEUGEOT' => ['PEUGEOT'],
-            'CITROEN' => ['CITROEN'],
-            'SEAT' => ['SEAT'],
-            'SKODA' => ['SKODA'],
-            'SUZUKI' => ['SUZUKI'],
-            'ISUZU' => ['ISUZU'],
-            'MG' => ['MG'],
-        ];
-        
-        return $alternatives[$makeUpper] ?? [$makeUpper];
+        return response()->json([
+            'success' => true,
+            'data' => $years,
+            'source' => 'backup',
+            'api_available' => false,
+            'note' => 'Datos de respaldo'
+        ]);
     }
 
     /**
-     * Obtener modelos para una marca y año específicos
+     * Obtener modelos para una marca y año - CON FALLBACK
      */
     public function getModels($make, $year)
     {
         $cacheKey = "nhtsa_vehicle_models_" . md5("{$make}_{$year}");
+        $cacheDuration = 604800;
         
-        return Cache::remember($cacheKey, 604800, function () use ($make, $year) {
+        return Cache::remember($cacheKey, $cacheDuration, function () use ($make, $year) {
             Log::info("Fetching models for make: {$make}, year: {$year}");
             
-            // Convertir a mayúsculas para la API NHTSA
-            $makeForApi = strtoupper($make);
-            
-            // Primero intentar con el nombre en mayúsculas
-            $response = $this->makeNhtsaRequest("{$this->nhtsaBaseUrl}/GetModelsForMakeYear/make/{$makeForApi}/modelyear/{$year}?format=json");
-            
-            if ($response && $response->successful()) {
-                $data = $response->json();
-                
-                if (isset($data['Results']) && count($data['Results']) > 0) {
-                    $models = collect($data['Results'])
-                        ->pluck('Model_Name')
-                        ->unique()
-                        ->filter(function ($model) {
-                            return !empty(trim($model)) && $model !== 'NULL';
-                        })
-                        ->sort()
-                        ->values()
-                        ->toArray();
-                    
-                    if (!empty($models)) {
-                        Log::info("Successfully processed models for {$makeForApi} {$year}", [
-                            'count' => count($models)
-                        ]);
-                        
-                        return response()->json([
-                            'success' => true,
-                            'data' => $models,
-                            'source' => 'nhtsa',
-                            'count' => count($models)
-                        ]);
-                    }
-                }
-            }
-            
-            // Si falla, intentar con nombres alternativos
-            $alternativeMakes = $this->getAlternativeMakeNames($make);
-            
-            foreach ($alternativeMakes as $alternativeMake) {
-                $response = $this->makeNhtsaRequest("{$this->nhtsaBaseUrl}/GetModelsForMakeYear/make/{$alternativeMake}/modelyear/{$year}?format=json");
+            // Primero intentar con API
+            if ($this->apiAvailable) {
+                $makeForApi = strtoupper($make);
+                $response = $this->makeNhtsaRequest(
+                    "{$this->nhtsaBaseUrl}/GetModelsForMakeYear/make/{$makeForApi}/modelyear/{$year}?format=json"
+                );
                 
                 if ($response && $response->successful()) {
                     $data = $response->json();
@@ -383,144 +247,44 @@ class VehicleController extends Controller
                             ->toArray();
                         
                         if (!empty($models)) {
-                            Log::info("Successfully processed models using alternative name", [
-                                'original' => $make,
-                                'alternative' => $alternativeMake,
-                                'count' => count($models)
-                            ]);
-                            
+                            Log::info("Modelos obtenidos de API", ['count' => count($models)]);
                             return response()->json([
                                 'success' => true,
                                 'data' => $models,
-                                'source' => 'nhtsa_alternative',
-                                'count' => count($models)
+                                'source' => 'nhtsa',
+                                'api_available' => true
                             ]);
                         }
                     }
                 }
             }
             
-            // Si todo falla, usar datos de respaldo
-            Log::warning("All attempts failed for models: {$make} {$year}, using backup data");
-            return $this->getBackupModels($make);
+            // Fallback a datos locales
+            Log::info("Usando datos de respaldo para modelos de: {$make}");
+            return $this->getBackupModelsResponse($make);
         });
     }
 
     /**
-     * Búsqueda de vehículos por término
+     * Respuesta de respaldo para modelos
      */
-    public function searchVehicles($searchTerm)
+    private function getBackupModelsResponse($make)
     {
-        $cacheKey = "nhtsa_vehicle_search_" . md5($searchTerm);
-        
-        return Cache::remember($cacheKey, 3600, function () use ($searchTerm) {
-            $response = $this->makeNhtsaRequest("{$this->nhtsaBaseUrl}/getallmakes?format=json");
-            
-            if ($response && $response->successful()) {
-                $data = $response->json();
-                
-                if (isset($data['Results'])) {
-                    $results = collect($data['Results'])
-                        ->filter(function ($item) use ($searchTerm) {
-                            return stripos($item['Make_Name'], $searchTerm) !== false;
-                        })
-                        ->pluck('Make_Name')
-                        ->unique()
-                        ->sort()
-                        ->values()
-                        ->toArray();
-                    
-                    return response()->json([
-                        'success' => true,
-                        'data' => $results,
-                        'source' => 'nhtsa'
-                    ]);
-                }
-            }
-            
-            return response()->json([
-                'success' => true,
-                'data' => [],
-                'source' => 'backup'
-            ]);
-        });
-    }
-
-    /**
-     * Endpoint para verificar el estado de la API
-     */
-    public function getApiStatus()
-    {
-        try {
-            $response = $this->makeNhtsaRequest("{$this->nhtsaBaseUrl}/getallmakes?format=json");
-            
-            $status = 'offline';
-            $message = 'NHTSA API is not accessible';
-            $environment = app()->environment();
-            $sslVerification = !(app()->environment('local') || app()->environment('development'));
-            
-            if ($response) {
-                $status = $response->successful() ? 'online' : 'offline';
-                $message = $response->successful() ? 'NHTSA API is accessible' : 'NHTSA API returned error';
-            }
-            
-            return response()->json([
-                'success' => true,
-                'status' => $status,
-                'environment' => $environment,
-                'ssl_verification' => $sslVerification,
-                'message' => $message
-            ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'status' => 'offline',
-                'environment' => app()->environment(),
-                'error' => $e->getMessage()
-            ]);
-        }
-    }
-
-    /**
-     * Datos de respaldo para marcas (YA FILTRADO para México)
-     */
-    private function getBackupMakes()
-    {
-        $makes = $this->getPriorityMexicoMakes();
+        $models = $this->getBackupModelsData($make);
         
         return response()->json([
             'success' => true,
-            'data' => $makes,
-            'source' => 'backup_filtered',
-            'count' => count($makes),
-            'note' => 'Marcas prioritarias para mercado mexicano'
-        ]);
-    }
-
-    /**
-     * Datos de respaldo para años
-     */
-    private function getBackupYears()
-    {
-        $currentYear = date('Y');
-        $years = range($currentYear, $currentYear - 20);
-        $years = array_map('strval', $years);
-        
-        return response()->json([
-            'success' => true,
-            'data' => $years,
+            'data' => $models,
             'source' => 'backup',
-            'count' => count($years)
+            'api_available' => false,
+            'note' => 'Datos de respaldo'
         ]);
     }
 
     /**
      * Datos de respaldo para modelos
      */
-        /**
-     * Datos de respaldo para modelos (continuación)
-     */
-    private function getBackupModels($make)
+    private function getBackupModelsData($make)
     {
         $backupModels = [
             "NISSAN" => ["SENTRA", "ALTIMA", "ROGUE", "MURANO", "PATHFINDER", "MAXIMA", "VERSA", "KICKS", "ARMADA", "FRONTIER", "TITAN", "LEAF"],
@@ -554,18 +318,150 @@ class VehicleController extends Controller
             "MITSUBISHI" => ["OUTLANDER", "ECLIPSE CROSS", "MIRAGE", "OUTLANDER SPORT"],
             "MG" => ["MG3", "MG5", "MG ZS", "MG HS", "MG RX5"],
             "CHANGAN" => ["CS35", "CS55", "CS75", "CS85", "EADO"],
-            "JAC" => ["J2", "J3", "J4", "J5", "J6", "T6"]
+            "JAC" => ["J2", "J3", "J4", "J5", "J6", "T6"],
+            // Marca genérica para cualquier otra marca
+            "DEFAULT" => ["SEDAN", "HATCHBACK", "SUV", "PICKUP", "VAN", "COUPE", "CONVERTIBLE"]
         ];
         
-        $models = $backupModels[$make] ?? [];
-        sort($models);
+        $makeUpper = strtoupper($make);
+        return $backupModels[$makeUpper] ?? $backupModels["DEFAULT"];
+    }
+
+    /**
+     * Búsqueda de vehículos por término - CON FALLBACK
+     */
+    public function searchVehicles($searchTerm)
+    {
+        $cacheKey = "nhtsa_vehicle_search_" . md5($searchTerm);
+        $cacheDuration = 3600;
         
-        return response()->json([
-            'success' => true,
-            'data' => $models,
-            'source' => 'backup',
-            'count' => count($models)
-        ]);
+        return Cache::remember($cacheKey, $cacheDuration, function () use ($searchTerm) {
+            if ($this->apiAvailable) {
+                $response = $this->makeNhtsaRequest("{$this->nhtsaBaseUrl}/getallmakes?format=json");
+                
+                if ($response && $response->successful()) {
+                    $data = $response->json();
+                    
+                    if (isset($data['Results'])) {
+                        $results = collect($data['Results'])
+                            ->filter(function ($item) use ($searchTerm) {
+                                return stripos($item['Make_Name'], $searchTerm) !== false;
+                            })
+                            ->pluck('Make_Name')
+                            ->unique()
+                            ->sort()
+                            ->values()
+                            ->toArray();
+                        
+                        return response()->json([
+                            'success' => true,
+                            'data' => $results,
+                            'source' => 'nhtsa',
+                            'api_available' => true
+                        ]);
+                    }
+                }
+            }
+            
+            // Fallback: buscar en datos locales
+            $localMakes = $this->getPriorityMexicoMakes();
+            $results = array_filter($localMakes, function($make) use ($searchTerm) {
+                return stripos($make, $searchTerm) !== false;
+            });
+            
+            return response()->json([
+                'success' => true,
+                'data' => array_values($results),
+                'source' => 'backup',
+                'api_available' => false,
+                'note' => 'Búsqueda en datos locales'
+            ]);
+        });
+    }
+
+    /**
+     * Endpoint para verificar el estado de la API
+     */
+    public function getApiStatus()
+    {
+        try {
+            // Verificar estado actual
+            $apiAvailable = Cache::get('nhtsa_api_available', true);
+            
+            // Intentar una conexión rápida si pensamos que está disponible
+            if ($apiAvailable) {
+                $testResponse = Http::timeout(3)
+                    ->connectTimeout(2)
+                    ->get("{$this->nhtsaBaseUrl}/getallmakes?format=json");
+                
+                $apiAvailable = $testResponse->successful();
+                Cache::put('nhtsa_api_available', $apiAvailable, 300);
+            }
+            
+            return response()->json([
+                'success' => true,
+                'status' => $apiAvailable ? 'online' : 'offline',
+                'environment' => app()->environment(),
+                'message' => $apiAvailable ? 'API NHTSA disponible' : 'API NHTSA no disponible - Usando datos locales',
+                'timestamp' => now()->toDateTimeString()
+            ]);
+            
+        } catch (\Exception $e) {
+            Cache::put('nhtsa_api_available', false, 300);
+            
+            return response()->json([
+                'success' => true,
+                'status' => 'offline',
+                'environment' => app()->environment(),
+                'message' => 'API NHTSA no disponible - Usando datos locales',
+                'error' => $e->getMessage(),
+                'timestamp' => now()->toDateTimeString()
+            ]);
+        }
+    }
+
+    /**
+     * Datos de respaldo para marcas (YA FILTRADO para México)
+     */
+    private function getPriorityMexicoMakes()
+    {
+        return [
+            // Nivel 1: Marcas más populares
+            "NISSAN", "TOYOTA", "VOLKSWAGEN", "CHEVROLET", "FORD", "HYUNDAI", "KIA", "HONDA",
+            
+            // Nivel 2: Marcas con buena presencia
+            "MAZDA", "BMW", "MERCEDES-BENZ", "AUDI", "MITSUBISHI", "SUBARU",
+            
+            // Nivel 3: Marcas de lujo
+            "LEXUS", "VOLVO", "PORSCHE", "LAND ROVER", "JAGUAR", "MINI", "ACURA", "INFINITI",
+            
+            // Nivel 4: Otras marcas
+            "DODGE", "CHRYSLER", "RAM", "GMC", "BUICK", "CADILLAC", "LINCOLN", "FIAT", "RENAULT", 
+            "PEUGEOT", "CITROEN", "SEAT", "SKODA", "SUZUKI", "ISUZU",
+            
+            // Nivel 5: Marcas chinas
+            "MG", "CHANGAN", "JAC",
+            
+            // Marcas adicionales comunes
+            "TESLA", "JEEP", "ALFA ROMEO", "MASERATI", "BENTLEY", "ROLLS-ROYCE", "FERRARI", "LAMBORGHINI"
+        ];
+    }
+
+    /**
+     * Filtrar marcas para el mercado mexicano
+     */
+    private function filterMakesForMexico($allMakes)
+    {
+        $mexicoBrands = $this->getPriorityMexicoMakes();
+        $mexicoBrandsUpper = array_map('strtoupper', $mexicoBrands);
+        
+        $filteredMakes = array_filter($allMakes, function($make) use ($mexicoBrandsUpper) {
+            $makeUpper = strtoupper($make);
+            return in_array($makeUpper, $mexicoBrandsUpper);
+        });
+        
+        sort($filteredMakes);
+        return array_values($filteredMakes);
     }
 
     /**
@@ -574,27 +470,30 @@ class VehicleController extends Controller
     public function refreshCache()
     {
         try {
+            // Limpiar caches principales
+            Cache::forget('nhtsa_api_available');
             Cache::forget('nhtsa_vehicle_makes_mexico');
             
-            // Limpiar caches de años y modelos populares
-            $popularMakes = ['NISSAN', 'TOYOTA', 'HONDA', 'FORD', 'CHEVROLET', 'VOLKSWAGEN', 'BMW', 'MERCEDES-BENZ', 'AUDI'];
+            // Limpiar caches de años y modelos
+            $popularMakes = ['NISSAN', 'TOYOTA', 'HONDA', 'FORD', 'CHEVROLET', 'VOLKSWAGEN'];
             foreach ($popularMakes as $make) {
                 Cache::forget("nhtsa_vehicle_years_" . md5($make));
-                Cache::forget("nhtsa_vehicle_models_" . md5("{$make}_2024"));
+                Cache::forget("nhtsa_vehicle_models_" . md5("{$make}_" . date('Y')));
             }
             
             Log::info('Vehicle cache refreshed successfully');
             
             return response()->json([
                 'success' => true,
-                'message' => 'Cache refreshed successfully'
+                'message' => 'Cache refrescado exitosamente'
             ]);
+            
         } catch (\Exception $e) {
             Log::error('Error refreshing vehicle cache: ' . $e->getMessage());
             
             return response()->json([
                 'success' => false,
-                'message' => 'Error refreshing cache'
+                'message' => 'Error refrescando cache'
             ]);
         }
     }
@@ -604,19 +503,53 @@ class VehicleController extends Controller
      */
     public function getSystemInfo()
     {
+        $apiAvailable = Cache::get('nhtsa_api_available', true);
+        
         return response()->json([
             'success' => true,
             'data' => [
                 'environment' => app()->environment(),
-                'ssl_verification' => !(app()->environment('local') || app()->environment('development')),
+                'api_status' => $apiAvailable ? 'online' : 'offline',
                 'cache_driver' => config('cache.default'),
                 'cache_ttl_makes' => '1 semana',
                 'cache_ttl_years_models' => '1 semana',
-                'api_base_url' => $this->nhtsaBaseUrl,
-                'mexico_filter' => 'active',
-                'filter_type' => 'popular_brands_mexico',
-                'brands_count' => count($this->getPriorityMexicoMakes())
+                'failover_system' => 'active',
+                'fallback_data' => 'available',
+                'last_checked' => now()->toDateTimeString(),
+                'note' => $apiAvailable ? 
+                    'API NHTSA disponible - usando datos en tiempo real' : 
+                    'API NHTSA no disponible - usando datos locales de respaldo'
             ]
+        ]);
+    }
+
+    /**
+     * Endpoint de emergencia: forzar modo offline
+     */
+    public function forceOfflineMode()
+    {
+        Cache::put('nhtsa_api_available', false, 3600); // 1 hora
+        
+        return response()->json([
+            'success' => true,
+            'message' => 'Modo offline activado por 1 hora',
+            'timestamp' => now()->toDateTimeString(),
+            'note' => 'El sistema usará exclusivamente datos locales'
+        ]);
+    }
+
+    /**
+     * Endpoint de emergencia: forzar modo online
+     */
+    public function forceOnlineMode()
+    {
+        Cache::forget('nhtsa_api_available');
+        
+        return response()->json([
+            'success' => true,
+            'message' => 'Modo online activado',
+            'timestamp' => now()->toDateTimeString(),
+            'note' => 'El sistema intentará usar la API NHTSA'
         ]);
     }
 }
