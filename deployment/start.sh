@@ -8,7 +8,7 @@ sleep 5
 
 # Ejecutar migraciones
 echo "🗃️ Ejecutando migraciones..."
- # php artisan migrate --force
+php artisan migrate --force
 
 # Ejecutar seeders
 echo "🌱 Ejecutando seeders..."

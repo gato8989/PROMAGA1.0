@@ -9,61 +9,31 @@ use Illuminate\Support\Facades\Log;
 class VehicleController extends Controller
 {
     private $nhtsaBaseUrl = 'https://vpic.nhtsa.dot.gov/api/vehicles';
-    private $apiAvailable = true;
-
+    
     /**
-     * Constructor - Verificar disponibilidad de API al inicio
+     * Constructor - SIN verificación de API (evita bloqueos)
      */
     public function __construct()
     {
-        $this->checkApiAvailability();
+        // Constructor vacío intencionalmente
+        // La verificación se hace bajo demanda con caché
     }
 
     /**
-     * Verificar si la API está disponible
-     */
-    private function checkApiAvailability()
-    {
-        try {
-            // Verificar cache primero
-            $cacheKey = 'nhtsa_api_available';
-            $cachedAvailability = Cache::get($cacheKey);
-            
-            if ($cachedAvailability !== null) {
-                $this->apiAvailable = $cachedAvailability;
-                return;
-            }
-            
-            // Intentar conexión simple con timeout corto
-            $response = Http::timeout(5)
-                ->connectTimeout(3)
-                ->get("{$this->nhtsaBaseUrl}/getallmakes?format=json");
-            
-            $this->apiAvailable = $response->successful();
-            
-            // Cachear resultado por 5 minutos
-            Cache::put($cacheKey, $this->apiAvailable, 300);
-            
-        } catch (\Exception $e) {
-            $this->apiAvailable = false;
-            Cache::put($cacheKey, false, 300);
-            Log::warning('NHTSA API no disponible: ' . $e->getMessage());
-        }
-    }
-
-    /**
-     * Configuración segura para HTTP client
+     * Configuración segura para HTTP client - TIMEOUTS REDUCIDOS
      */
     private function makeNhtsaRequest($url)
     {
-        // Si sabemos que la API no está disponible, no intentar
-        if (!$this->apiAvailable) {
+        // Verificar si la API está disponible según cache
+        $apiAvailable = Cache::get('nhtsa_api_available', true);
+        if (!$apiAvailable) {
+            Log::debug('API no disponible según cache, usando datos locales');
             return null;
         }
 
         $options = [
-            'timeout' => 10,
-            'connect_timeout' => 5,
+            'timeout' => 3,           // ⚡ REDUCIDO: 3 segundos máximo
+            'connect_timeout' => 2,   // ⚡ REDUCIDO: 2 segundos para conexión
         ];
 
         // Solo deshabilitar SSL verification en desarrollo local
@@ -72,62 +42,277 @@ class VehicleController extends Controller
         }
 
         try {
-            return Http::withOptions($options)
-                ->retry(2, 500) // Solo 2 reintentos rápidos
+            $response = Http::withOptions($options)
+                ->retry(1, 100)        // ⚡ 1 reintento rápido, 100ms de espera
                 ->get($url);
+            
+            if ($response->successful()) {
+                return $response;
+            }
+            
+            // Si la respuesta no es exitosa, marcar API como no disponible
+            Cache::put('nhtsa_api_available', false, 300); // 5 minutos
+            return null;
+            
         } catch (\Exception $e) {
-            Log::warning("NHTSA Request failed: " . $e->getMessage());
+            Log::warning('NHTSA Request failed: ' . $e->getMessage());
             
             // Marcar API como no disponible temporalmente
-            Cache::put('nhtsa_api_available', false, 60); // 1 minuto
+            Cache::put('nhtsa_api_available', false, 300); // 5 minutos
             
             return null;
         }
     }
 
     /**
-     * Obtener todas las marcas de vehículos - CON FALLBACK AUTOMÁTICO
+     * Obtener todas las marcas de vehículos - RESPUESTA INMEDIATA GARANTIZADA
      */
+    /**
+ * Obtener marcas - VERSIÓN CON DOBLE CACHE
+ */
     public function getMakes()
     {
-        $cacheKey = 'nhtsa_vehicle_makes_mexico';
+        $apiCacheKey = 'nhtsa_vehicle_makes_api';     // Cache de API real
+        $backupCacheKey = 'nhtsa_vehicle_makes_backup'; // Cache de backup
+        
+        // PRIMERO: Intentar cache de API
+        $apiCache = Cache::get($apiCacheKey);
+        if ($apiCache) {
+            Log::info('Usando marcas desde cache de API');
+            return response()->json(json_decode($apiCache, true));
+        }
+        
+        // SEGUNDO: Intentar API
+        $response = $this->makeNhtsaRequest("{$this->nhtsaBaseUrl}/getallmakes?format=json");
+        
+        if ($response && $response->successful()) {
+            $data = $response->json();
+            
+            if (isset($data['Results']) && count($data['Results']) > 0) {
+                $allMakes = collect($data['Results'])
+                    ->pluck('Make_Name')
+                    ->unique()
+                    ->sort()
+                    ->values()
+                    ->toArray();
+                
+                $mexicoMakes = $this->filterMakesForMexico($allMakes);
+                
+                $result = [
+                    'success' => true,
+                    'data' => $mexicoMakes,
+                    'source' => 'nhtsa_api',
+                    'count' => count($mexicoMakes),
+                    'timestamp' => now()->toDateTimeString()
+                ];
+                
+                // Guardar en cache de API
+                Cache::put($apiCacheKey, json_encode($result), 3600); // 1 hora
+                // También guardar en backup (por si acaso)
+                Cache::put($backupCacheKey, json_encode($result), 604800); // 1 semana
+                
+                return response()->json($result);
+            }
+        }
+        
+        // TERCERO: Intentar cache de backup
+        $backupCache = Cache::get($backupCacheKey);
+        if ($backupCache) {
+            Log::info('Usando marcas desde cache de backup');
+            $data = json_decode($backupCache, true);
+            $data['note'] = 'Usando datos de respaldo - API no disponible';
+            return response()->json($data);
+        }
+        
+        // CUARTO: Si no hay nada, generar nuevo backup
+        return $this->getBackupMakesResponse();
+    }
+
+    /**
+     * Obtener años para una marca específica - RESPUESTA INMEDIATA
+     */
+    public function getYears($make)
+    {
+        $cacheKey = "nhtsa_vehicle_years_" . md5($make);
         $cacheDuration = 604800; // 1 semana
         
-        return Cache::remember($cacheKey, $cacheDuration, function () {
-            // Primero intentar con API
-            if ($this->apiAvailable) {
-                $response = $this->makeNhtsaRequest("{$this->nhtsaBaseUrl}/getallmakes?format=json");
+        // PRIMERO: Intentar cache
+        $cached = Cache::get($cacheKey);
+        if ($cached) {
+            return response()->json(json_decode($cached, true));
+        }
+        
+        // SEGUNDO: Intentar API
+        $makeForApi = strtoupper($make);
+        $response = $this->makeNhtsaRequest("{$this->nhtsaBaseUrl}/GetModelsForMake/{$makeForApi}?format=json");
+        
+        if ($response && $response->successful()) {
+            $data = $response->json();
+            
+            if (isset($data['Results']) && count($data['Results']) > 0) {
+                $years = collect($data['Results'])
+                    ->pluck('Model_Year')
+                    ->unique()
+                    ->filter(function ($year) {
+                        return is_numeric($year) && $year >= 1990 && $year <= date('Y') + 1;
+                    })
+                    ->sortDesc()
+                    ->values()
+                    ->toArray();
                 
-                if ($response && $response->successful()) {
-                    $data = $response->json();
+                if (!empty($years)) {
+                    $result = [
+                        'success' => true,
+                        'data' => $years,
+                        'source' => 'nhtsa',
+                        'api_available' => true,
+                        'count' => count($years)
+                    ];
                     
-                    if (isset($data['Results']) && count($data['Results']) > 0) {
-                        $allMakes = collect($data['Results'])
-                            ->pluck('Make_Name')
-                            ->unique()
-                            ->sort()
-                            ->values()
-                            ->toArray();
-                        
-                        $mexicoMakes = $this->filterMakesForMexico($allMakes);
-                        
-                        if (!empty($mexicoMakes)) {
-                            Log::info('Marcas obtenidas de API NHTSA', ['count' => count($mexicoMakes)]);
-                            return response()->json([
-                                'success' => true,
-                                'data' => $mexicoMakes,
-                                'source' => 'nhtsa_filtered',
-                                'api_available' => true
-                            ]);
-                        }
-                    }
+                    Cache::put($cacheKey, json_encode($result), $cacheDuration);
+                    
+                    return response()->json($result);
                 }
             }
+        }
+        
+        // TERCERO: Datos de respaldo
+        return $this->getBackupYearsResponse();
+    }
+
+    /**
+     * Obtener modelos para una marca y año - RESPUESTA INMEDIATA
+     */
+    public function getModels($make, $year)
+    {
+        $cacheKey = "nhtsa_vehicle_models_" . md5("{$make}_{$year}");
+        $cacheDuration = 604800; // 1 semana
+        
+        // PRIMERO: Intentar cache
+        $cached = Cache::get($cacheKey);
+        if ($cached) {
+            return response()->json(json_decode($cached, true));
+        }
+        
+        // SEGUNDO: Intentar API
+        $makeForApi = strtoupper($make);
+        $response = $this->makeNhtsaRequest(
+            "{$this->nhtsaBaseUrl}/GetModelsForMakeYear/make/{$makeForApi}/modelyear/{$year}?format=json"
+        );
+        
+        if ($response && $response->successful()) {
+            $data = $response->json();
             
-            // Si llegamos aquí, usar datos de respaldo
-            Log::info('Usando datos de respaldo para marcas');
-            return $this->getBackupMakesResponse();
-        });
+            if (isset($data['Results']) && count($data['Results']) > 0) {
+                $models = collect($data['Results'])
+                    ->pluck('Model_Name')
+                    ->unique()
+                    ->filter(function ($model) {
+                        return !empty(trim($model)) && $model !== 'NULL';
+                    })
+                    ->sort()
+                    ->values()
+                    ->toArray();
+                
+                if (!empty($models)) {
+                    $result = [
+                        'success' => true,
+                        'data' => $models,
+                        'source' => 'nhtsa',
+                        'api_available' => true,
+                        'count' => count($models)
+                    ];
+                    
+                    Cache::put($cacheKey, json_encode($result), $cacheDuration);
+                    
+                    return response()->json($result);
+                }
+            }
+        }
+        
+        // TERCERO: Datos de respaldo
+        return $this->getBackupModelsResponse($make);
+    }
+
+    /**
+     * Búsqueda de vehículos por término
+     */
+    public function searchVehicles($searchTerm)
+    {
+        $cacheKey = "nhtsa_vehicle_search_" . md5($searchTerm);
+        $cacheDuration = 3600; // 1 hora
+        
+        // PRIMERO: Intentar cache
+        $cached = Cache::get($cacheKey);
+        if ($cached) {
+            return response()->json(json_decode($cached, true));
+        }
+        
+        // SEGUNDO: Intentar API
+        $response = $this->makeNhtsaRequest("{$this->nhtsaBaseUrl}/getallmakes?format=json");
+        
+        if ($response && $response->successful()) {
+            $data = $response->json();
+            
+            if (isset($data['Results'])) {
+                $results = collect($data['Results'])
+                    ->filter(function ($item) use ($searchTerm) {
+                        return stripos($item['Make_Name'], $searchTerm) !== false;
+                    })
+                    ->pluck('Make_Name')
+                    ->unique()
+                    ->sort()
+                    ->values()
+                    ->toArray();
+                
+                $result = [
+                    'success' => true,
+                    'data' => $results,
+                    'source' => 'nhtsa',
+                    'api_available' => true
+                ];
+                
+                Cache::put($cacheKey, json_encode($result), $cacheDuration);
+                
+                return response()->json($result);
+            }
+        }
+        
+        // TERCERO: Búsqueda en datos locales
+        $localMakes = $this->getPriorityMexicoMakes();
+        $results = array_values(array_filter($localMakes, function($make) use ($searchTerm) {
+            return stripos($make, $searchTerm) !== false;
+        }));
+        
+        $result = [
+            'success' => true,
+            'data' => $results,
+            'source' => 'backup',
+            'api_available' => false,
+            'note' => 'Búsqueda en datos locales'
+        ];
+        
+        Cache::put($cacheKey, json_encode($result), $cacheDuration);
+        
+        return response()->json($result);
+    }
+
+    /**
+     * Endpoint para verificar el estado de la API - RÁPIDO
+     */
+    public function getApiStatus()
+    {
+        $apiAvailable = Cache::get('nhtsa_api_available', true);
+        
+        return response()->json([
+            'success' => true,
+            'status' => $apiAvailable ? 'online' : 'offline',
+            'environment' => app()->environment(),
+            'message' => $apiAvailable ? 
+                'API NHTSA disponible - usando datos en tiempo real' : 
+                'API NHTSA no disponible - usando datos locales de respaldo',
+            'timestamp' => now()->toDateTimeString()
+        ]);
     }
 
     /**
@@ -137,63 +322,19 @@ class VehicleController extends Controller
     {
         $makes = $this->getPriorityMexicoMakes();
         
-        return response()->json([
+        $result = [
             'success' => true,
             'data' => $makes,
             'source' => 'backup',
             'api_available' => false,
             'count' => count($makes),
             'note' => 'Datos de respaldo - API no disponible'
-        ]);
-    }
-
-    /**
-     * Obtener años para una marca específica - CON FALLBACK
-     */
-    public function getYears($make)
-    {
-        $cacheKey = "nhtsa_vehicle_years_" . md5($make);
-        $cacheDuration = 604800;
+        ];
         
-        return Cache::remember($cacheKey, $cacheDuration, function () use ($make) {
-            Log::info("Fetching years for make: {$make}");
-            
-            // Primero intentar con API
-            if ($this->apiAvailable) {
-                $makeForApi = strtoupper($make);
-                $response = $this->makeNhtsaRequest("{$this->nhtsaBaseUrl}/GetModelsForMake/{$makeForApi}?format=json");
-                
-                if ($response && $response->successful()) {
-                    $data = $response->json();
-                    
-                    if (isset($data['Results']) && count($data['Results']) > 0) {
-                        $years = collect($data['Results'])
-                            ->pluck('Model_Year')
-                            ->unique()
-                            ->filter(function ($year) {
-                                return is_numeric($year) && $year >= 1990 && $year <= date('Y') + 1;
-                            })
-                            ->sortDesc()
-                            ->values()
-                            ->toArray();
-                        
-                        if (!empty($years)) {
-                            Log::info("Años obtenidos de API", ['count' => count($years)]);
-                            return response()->json([
-                                'success' => true,
-                                'data' => $years,
-                                'source' => 'nhtsa',
-                                'api_available' => true
-                            ]);
-                        }
-                    }
-                }
-            }
-            
-            // Fallback a datos locales
-            Log::info("Usando datos de respaldo para años de: {$make}");
-            return $this->getBackupYearsResponse();
-        });
+        // Cachear por 1 semana
+        Cache::put('nhtsa_vehicle_makes_mexico', json_encode($result), 604800);
+        
+        return response()->json($result);
     }
 
     /**
@@ -210,59 +351,9 @@ class VehicleController extends Controller
             'data' => $years,
             'source' => 'backup',
             'api_available' => false,
-            'note' => 'Datos de respaldo'
+            'note' => 'Datos de respaldo',
+            'count' => count($years)
         ]);
-    }
-
-    /**
-     * Obtener modelos para una marca y año - CON FALLBACK
-     */
-    public function getModels($make, $year)
-    {
-        $cacheKey = "nhtsa_vehicle_models_" . md5("{$make}_{$year}");
-        $cacheDuration = 604800;
-        
-        return Cache::remember($cacheKey, $cacheDuration, function () use ($make, $year) {
-            Log::info("Fetching models for make: {$make}, year: {$year}");
-            
-            // Primero intentar con API
-            if ($this->apiAvailable) {
-                $makeForApi = strtoupper($make);
-                $response = $this->makeNhtsaRequest(
-                    "{$this->nhtsaBaseUrl}/GetModelsForMakeYear/make/{$makeForApi}/modelyear/{$year}?format=json"
-                );
-                
-                if ($response && $response->successful()) {
-                    $data = $response->json();
-                    
-                    if (isset($data['Results']) && count($data['Results']) > 0) {
-                        $models = collect($data['Results'])
-                            ->pluck('Model_Name')
-                            ->unique()
-                            ->filter(function ($model) {
-                                return !empty(trim($model)) && $model !== 'NULL';
-                            })
-                            ->sort()
-                            ->values()
-                            ->toArray();
-                        
-                        if (!empty($models)) {
-                            Log::info("Modelos obtenidos de API", ['count' => count($models)]);
-                            return response()->json([
-                                'success' => true,
-                                'data' => $models,
-                                'source' => 'nhtsa',
-                                'api_available' => true
-                            ]);
-                        }
-                    }
-                }
-            }
-            
-            // Fallback a datos locales
-            Log::info("Usando datos de respaldo para modelos de: {$make}");
-            return $this->getBackupModelsResponse($make);
-        });
     }
 
     /**
@@ -277,7 +368,8 @@ class VehicleController extends Controller
             'data' => $models,
             'source' => 'backup',
             'api_available' => false,
-            'note' => 'Datos de respaldo'
+            'note' => 'Datos de respaldo',
+            'count' => count($models)
         ]);
     }
 
@@ -319,7 +411,6 @@ class VehicleController extends Controller
             "MG" => ["MG3", "MG5", "MG ZS", "MG HS", "MG RX5"],
             "CHANGAN" => ["CS35", "CS55", "CS75", "CS85", "EADO"],
             "JAC" => ["J2", "J3", "J4", "J5", "J6", "T6"],
-            // Marca genérica para cualquier otra marca
             "DEFAULT" => ["SEDAN", "HATCHBACK", "SUV", "PICKUP", "VAN", "COUPE", "CONVERTIBLE"]
         ];
         
@@ -328,121 +419,17 @@ class VehicleController extends Controller
     }
 
     /**
-     * Búsqueda de vehículos por término - CON FALLBACK
-     */
-    public function searchVehicles($searchTerm)
-    {
-        $cacheKey = "nhtsa_vehicle_search_" . md5($searchTerm);
-        $cacheDuration = 3600;
-        
-        return Cache::remember($cacheKey, $cacheDuration, function () use ($searchTerm) {
-            if ($this->apiAvailable) {
-                $response = $this->makeNhtsaRequest("{$this->nhtsaBaseUrl}/getallmakes?format=json");
-                
-                if ($response && $response->successful()) {
-                    $data = $response->json();
-                    
-                    if (isset($data['Results'])) {
-                        $results = collect($data['Results'])
-                            ->filter(function ($item) use ($searchTerm) {
-                                return stripos($item['Make_Name'], $searchTerm) !== false;
-                            })
-                            ->pluck('Make_Name')
-                            ->unique()
-                            ->sort()
-                            ->values()
-                            ->toArray();
-                        
-                        return response()->json([
-                            'success' => true,
-                            'data' => $results,
-                            'source' => 'nhtsa',
-                            'api_available' => true
-                        ]);
-                    }
-                }
-            }
-            
-            // Fallback: buscar en datos locales
-            $localMakes = $this->getPriorityMexicoMakes();
-            $results = array_filter($localMakes, function($make) use ($searchTerm) {
-                return stripos($make, $searchTerm) !== false;
-            });
-            
-            return response()->json([
-                'success' => true,
-                'data' => array_values($results),
-                'source' => 'backup',
-                'api_available' => false,
-                'note' => 'Búsqueda en datos locales'
-            ]);
-        });
-    }
-
-    /**
-     * Endpoint para verificar el estado de la API
-     */
-    public function getApiStatus()
-    {
-        try {
-            // Verificar estado actual
-            $apiAvailable = Cache::get('nhtsa_api_available', true);
-            
-            // Intentar una conexión rápida si pensamos que está disponible
-            if ($apiAvailable) {
-                $testResponse = Http::timeout(3)
-                    ->connectTimeout(2)
-                    ->get("{$this->nhtsaBaseUrl}/getallmakes?format=json");
-                
-                $apiAvailable = $testResponse->successful();
-                Cache::put('nhtsa_api_available', $apiAvailable, 300);
-            }
-            
-            return response()->json([
-                'success' => true,
-                'status' => $apiAvailable ? 'online' : 'offline',
-                'environment' => app()->environment(),
-                'message' => $apiAvailable ? 'API NHTSA disponible' : 'API NHTSA no disponible - Usando datos locales',
-                'timestamp' => now()->toDateTimeString()
-            ]);
-            
-        } catch (\Exception $e) {
-            Cache::put('nhtsa_api_available', false, 300);
-            
-            return response()->json([
-                'success' => true,
-                'status' => 'offline',
-                'environment' => app()->environment(),
-                'message' => 'API NHTSA no disponible - Usando datos locales',
-                'error' => $e->getMessage(),
-                'timestamp' => now()->toDateTimeString()
-            ]);
-        }
-    }
-
-    /**
-     * Datos de respaldo para marcas (YA FILTRADO para México)
+     * Lista prioritaria de marcas para México
      */
     private function getPriorityMexicoMakes()
     {
         return [
-            // Nivel 1: Marcas más populares
             "NISSAN", "TOYOTA", "VOLKSWAGEN", "CHEVROLET", "FORD", "HYUNDAI", "KIA", "HONDA",
-            
-            // Nivel 2: Marcas con buena presencia
             "MAZDA", "BMW", "MERCEDES-BENZ", "AUDI", "MITSUBISHI", "SUBARU",
-            
-            // Nivel 3: Marcas de lujo
             "LEXUS", "VOLVO", "PORSCHE", "LAND ROVER", "JAGUAR", "MINI", "ACURA", "INFINITI",
-            
-            // Nivel 4: Otras marcas
             "DODGE", "CHRYSLER", "RAM", "GMC", "BUICK", "CADILLAC", "LINCOLN", "FIAT", "RENAULT", 
             "PEUGEOT", "CITROEN", "SEAT", "SKODA", "SUZUKI", "ISUZU",
-            
-            // Nivel 5: Marcas chinas
             "MG", "CHANGAN", "JAC",
-            
-            // Marcas adicionales comunes
             "TESLA", "JEEP", "ALFA ROMEO", "MASERATI", "BENTLEY", "ROLLS-ROYCE", "FERRARI", "LAMBORGHINI"
         ];
     }
@@ -470,11 +457,9 @@ class VehicleController extends Controller
     public function refreshCache()
     {
         try {
-            // Limpiar caches principales
             Cache::forget('nhtsa_api_available');
             Cache::forget('nhtsa_vehicle_makes_mexico');
             
-            // Limpiar caches de años y modelos
             $popularMakes = ['NISSAN', 'TOYOTA', 'HONDA', 'FORD', 'CHEVROLET', 'VOLKSWAGEN'];
             foreach ($popularMakes as $make) {
                 Cache::forget("nhtsa_vehicle_years_" . md5($make));
@@ -511,9 +496,6 @@ class VehicleController extends Controller
                 'environment' => app()->environment(),
                 'api_status' => $apiAvailable ? 'online' : 'offline',
                 'cache_driver' => config('cache.default'),
-                'cache_ttl_makes' => '1 semana',
-                'cache_ttl_years_models' => '1 semana',
-                'failover_system' => 'active',
                 'fallback_data' => 'available',
                 'last_checked' => now()->toDateTimeString(),
                 'note' => $apiAvailable ? 
@@ -533,8 +515,7 @@ class VehicleController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Modo offline activado por 1 hora',
-            'timestamp' => now()->toDateTimeString(),
-            'note' => 'El sistema usará exclusivamente datos locales'
+            'timestamp' => now()->toDateTimeString()
         ]);
     }
 
@@ -548,8 +529,7 @@ class VehicleController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Modo online activado',
-            'timestamp' => now()->toDateTimeString(),
-            'note' => 'El sistema intentará usar la API NHTSA'
+            'timestamp' => now()->toDateTimeString()
         ]);
     }
 }
