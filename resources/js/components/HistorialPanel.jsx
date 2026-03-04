@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import axios from 'axios';
 
+
+
 // Componente NotasPopup se mantiene igual...
 
 const HistorialPanel = ({ user }) => {
@@ -593,6 +595,58 @@ const HistorialPanel = ({ user }) => {
                     }
                 />
             )}
+        </div>
+    );
+};
+
+const NotasPopup = ({ notas, onNotasChange, onGuardar, onCancelar, guardando, vehiculo }) => {
+    return (
+        <div className="popup-overlay">
+            <div className="popup">
+                <div className="popup-content">
+                    <h2>Notas del Vehículo</h2>
+                    <p><strong>Vehículo:</strong> {vehiculo}</p>
+                    
+                    <div className="form-group">
+                        <label htmlFor="notas">Notas y observaciones:</label>
+                        <textarea
+                            id="notas"
+                            value={notas}
+                            onChange={(e) => onNotasChange(e.target.value)}
+                            placeholder="Escribe aquí las notas, observaciones, detalles importantes..."
+                            rows="8"
+                            style={{
+                                width: '100%',
+                                padding: '12px',
+                                border: '1px solid #cbd5e0',
+                                borderRadius: '6px',
+                                fontSize: '14px',
+                                fontFamily: 'inherit',
+                                resize: 'vertical'
+                            }}
+                        />
+                    </div>
+
+                    <div className="form-actions">
+                        <button 
+                            type="button" 
+                            onClick={onGuardar}
+                            className="btn-success"
+                            disabled={guardando}
+                        >
+                            {guardando ? 'Guardando...' : 'Guardar Notas'}
+                        </button>
+                        <button 
+                            type="button" 
+                            onClick={onCancelar}
+                            className="btn-cancel"
+                            disabled={guardando}
+                        >
+                            Cancelar
+                        </button>
+                    </div>
+                </div>
+            </div>
         </div>
     );
 };
