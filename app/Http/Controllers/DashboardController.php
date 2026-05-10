@@ -30,7 +30,6 @@ class DashboardController extends Controller
             if ($totalVehiculos > 0) {
                 $tiempos = [];
                 foreach ($trabajos as $trabajo) {
-                    // Obtener fechas correctamente
                     $entrada = $this->parseFecha($trabajo->fecha_ingreso, $trabajo->hora_creacion);
                     $salida = $this->parseFecha($trabajo->fecha_terminado, $trabajo->hora_terminado);
                     
@@ -78,48 +77,96 @@ class DashboardController extends Controller
     {
         try {
             $fechaInicio = $request->query('fecha_inicio') 
-                ? Carbon::parse($request->query('fecha_inicio'))->startOfDay() 
+                ? Carbon::parse($request->query('fecha_inicio'))->startOfDay()
                 : now()->subDays(30)->startOfDay();
             $fechaFin = $request->query('fecha_fin') 
-                ? Carbon::parse($request->query('fecha_fin'))->endOfDay() 
+                ? Carbon::parse($request->query('fecha_fin'))->endOfDay()
                 : now()->endOfDay();
                 
             $trabajos = HistorialTrabajo::whereBetween('created_at', [$fechaInicio, $fechaFin])->get();
             
+            // Crear un array con todos los días del rango (inicializados en 0)
             $tendencia = [];
             $currentDate = $fechaInicio->copy();
             
             while ($currentDate <= $fechaFin) {
-                $fechaStr = $currentDate->format('Y-m-d');
+                $fechaKey = $currentDate->format('Y-m-d');
+                $tendencia[$fechaKey] = [
+                    'fecha' => $fechaKey,
+                    'vehiculos' => 0,
+                    'horas' => 0
+                ];
+                $currentDate->addDay();
+            }
+            
+            // Agregar los datos reales de los trabajos
+            foreach ($trabajos as $trabajo) {
+                // Parsear la fecha de terminado
+                $fechaTerminado = $this->parseFecha($trabajo->fecha_terminado, null);
                 
-                $trabajosDelDia = $trabajos->filter(function($trabajo) use ($currentDate) {
-                    $fechaTrabajo = $this->parseFecha($trabajo->fecha_terminado, null);
-                    return $fechaTrabajo && $fechaTrabajo->format('Y-m-d') === $currentDate->format('Y-m-d');
-                });
+                if (!$fechaTerminado) {
+                    \Illuminate\Support\Facades\Log::warning('Fecha no parseable:', [
+                        'id' => $trabajo->id,
+                        'fecha_terminado' => $trabajo->fecha_terminado
+                    ]);
+                    continue;
+                }
                 
-                $vehiculosCount = $trabajosDelDia->count();
-                $horas = 0;
+                // Obtener la fecha como string en formato Y-m-d
+                $fechaKey = $fechaTerminado->format('Y-m-d');
                 
-                foreach ($trabajosDelDia as $trabajo) {
+                // Log para depuración
+                \Illuminate\Support\Facades\Log::info('Procesando trabajo:', [
+                    'id' => $trabajo->id,
+                    'fecha_original' => $trabajo->fecha_terminado,
+                    'fecha_parseada' => $fechaKey
+                ]);
+                
+                // Si la fecha está dentro del rango, agregar los datos
+                if (isset($tendencia[$fechaKey])) {
+                    $tendencia[$fechaKey]['vehiculos']++;
+                    
+                    // Calcular horas del trabajo
                     $entrada = $this->parseFecha($trabajo->fecha_ingreso, $trabajo->hora_creacion);
                     $salida = $this->parseFecha($trabajo->fecha_terminado, $trabajo->hora_terminado);
                     
                     if ($entrada && $salida) {
                         $minutos = $entrada->diffInMinutes($salida);
-                        $horas += $minutos / 60;
+                        $horas = $minutos / 60;
+                        $tendencia[$fechaKey]['horas'] += $horas;
                     }
+                } else {
+                    \Illuminate\Support\Facades\Log::warning('Fecha fuera de rango:', [
+                        'fecha' => $fechaKey,
+                        'rango_inicio' => $fechaInicio->format('Y-m-d'),
+                        'rango_fin' => $fechaFin->format('Y-m-d'),
+                        'fecha_original' => $trabajo->fecha_terminado
+                    ]);
                 }
-                
-                $tendencia[] = [
-                    'fecha' => $fechaStr,
-                    'vehiculos' => $vehiculosCount,
-                    'horas' => round($horas, 2)
-                ];
-                
-                $currentDate->addDay();
             }
             
-            return response()->json(['success' => true, 'data' => $tendencia]);
+            // Convertir el array asociativo a un array indexado y ordenar
+            $resultado = array_values($tendencia);
+            
+            // Ordenar por fecha
+            usort($resultado, function($a, $b) {
+                return strcmp($a['fecha'], $b['fecha']);
+            });
+            
+            // Redondear horas
+            foreach ($resultado as &$item) {
+                $item['horas'] = round($item['horas'], 2);
+            }
+            
+            // Log para depuración (puedes eliminarlo después)
+            \Illuminate\Support\Facades\Log::info('Tendencia generada:', [
+                'total_dias' => count($resultado),
+                'dias_con_datos' => count(array_filter($resultado, fn($d) => $d['vehiculos'] > 0)),
+                'rango' => $fechaInicio->format('Y-m-d') . ' - ' . $fechaFin->format('Y-m-d')
+            ]);
+            
+            return response()->json(['success' => true, 'data' => $resultado]);
+            
         } catch (\Exception $e) {
             \Illuminate\Support\Facades\Log::error('Error en trend:', [
                 'message' => $e->getMessage(),
@@ -138,6 +185,7 @@ class DashboardController extends Controller
      */
     public function brands(Request $request)
     {
+        // ... (sin cambios, igual que antes)
         try {
             $fechaInicio = $request->query('fecha_inicio') 
                 ? Carbon::parse($request->query('fecha_inicio'))->startOfDay() 
@@ -188,6 +236,7 @@ class DashboardController extends Controller
      */
     public function models(Request $request)
     {
+        // ... (sin cambios, igual que antes)
         try {
             $fechaInicio = $request->query('fecha_inicio') 
                 ? Carbon::parse($request->query('fecha_inicio'))->startOfDay() 
@@ -235,6 +284,7 @@ class DashboardController extends Controller
      */
     public function years(Request $request)
     {
+        // ... (sin cambios, igual que antes)
         try {
             $fechaInicio = $request->query('fecha_inicio') 
                 ? Carbon::parse($request->query('fecha_inicio'))->startOfDay() 
@@ -282,6 +332,7 @@ class DashboardController extends Controller
      */
     public function commonWorks(Request $request)
     {
+        // ... (sin cambios importantes)
         try {
             $fechaInicio = $request->query('fecha_inicio') 
                 ? Carbon::parse($request->query('fecha_inicio'))->startOfDay() 
@@ -347,7 +398,7 @@ class DashboardController extends Controller
     }
 
     /**
-     * Obtener tiempos de trabajo - CORREGIDO (calcula horas correctamente)
+     * Obtener tiempos de trabajo - MODIFICADO: solo trabajos comunes
      */
     public function workTimes(Request $request)
     {
@@ -369,12 +420,41 @@ class DashboardController extends Controller
                 ]);
             }
             
+            // Primero obtener los trabajos más comunes (top 10)
+            $trabajosConteo = [];
+            foreach ($trabajos as $trabajo) {
+                if (is_array($trabajo->trabajos)) {
+                    foreach ($trabajo->trabajos as $work) {
+                        $workClean = trim($work);
+                        if (!empty($workClean)) {
+                            $workClean = preg_replace('/[^a-zA-Z0-9áéíóúñÑüÜ\s\-]/u', '', $workClean);
+                            $workClean = trim($workClean);
+                            if (!empty($workClean)) {
+                                $trabajosConteo[$workClean] = ($trabajosConteo[$workClean] ?? 0) + 1;
+                            }
+                        }
+                    }
+                }
+            }
+            
+            if (empty($trabajosConteo)) {
+                return response()->json([
+                    'success' => true, 
+                    'data' => [],
+                    'message' => 'No hay datos de trabajos disponibles'
+                ]);
+            }
+            
+            arsort($trabajosConteo);
+            $topTrabajos = array_slice($trabajosConteo, 0, 10, true);
+            $trabajosTopNombres = array_keys($topTrabajos);
+            
+            // Calcular tiempos solo para los trabajos más comunes
             $tiemposPorTrabajo = [];
             
             foreach ($trabajos as $trabajo) {
                 $trabajosRealizados = $trabajo->trabajos;
                 
-                // Calcular horas usando el método parseFecha
                 $entrada = $this->parseFecha($trabajo->fecha_ingreso, $trabajo->hora_creacion);
                 $salida = $this->parseFecha($trabajo->fecha_terminado, $trabajo->hora_terminado);
                 
@@ -394,7 +474,8 @@ class DashboardController extends Controller
                         $workClean = preg_replace('/[^a-zA-Z0-9áéíóúñÑüÜ\s\-]/u', '', $workClean);
                         $workClean = trim($workClean);
                         
-                        if (!empty($workClean)) {
+                        // Solo procesar si el trabajo está en el top 10
+                        if (!empty($workClean) && in_array($workClean, $trabajosTopNombres)) {
                             if (!isset($tiemposPorTrabajo[$workClean])) {
                                 $tiemposPorTrabajo[$workClean] = [];
                             }
@@ -408,7 +489,7 @@ class DashboardController extends Controller
                 return response()->json([
                     'success' => true, 
                     'data' => [],
-                    'message' => 'No hay datos de tiempos disponibles para los trabajos procesados'
+                    'message' => 'No hay datos de tiempos disponibles'
                 ]);
             }
             
@@ -424,10 +505,18 @@ class DashboardController extends Controller
                 }
             }
             
-            usort($data, fn($a, $b) => $b['promedio'] <=> $a['promedio']);
-            $result = array_slice($data, 0, 10);
+            // Ordenar por el mismo orden que los trabajos más comunes
+            $orderedData = [];
+            foreach ($trabajosTopNombres as $nombreTrabajo) {
+                foreach ($data as $item) {
+                    if ($item['trabajo'] === $nombreTrabajo) {
+                        $orderedData[] = $item;
+                        break;
+                    }
+                }
+            }
             
-            return response()->json(['success' => true, 'data' => $result]);
+            return response()->json(['success' => true, 'data' => $orderedData]);
             
         } catch (\Exception $e) {
             \Illuminate\Support\Facades\Log::error('Error en workTimes:', [
@@ -443,17 +532,17 @@ class DashboardController extends Controller
     }
 
     /**
-     * Obtener horas por marca - CORREGIDO (acumula horas correctamente)
+     * Obtener horas por marca - CORREGIDO
      */
     public function hoursByBrand(Request $request)
     {
         try {
             $fechaInicio = $request->query('fecha_inicio') 
-                ? Carbon::parse($request->query('fecha_inicio'))->startOfDay() 
-                : now()->subDays(30)->startOfDay();
+                ? Carbon::parse($request->query('fecha_inicio'))->startOfDay()->setTimezone('UTC')
+                : now()->subDays(30)->startOfDay()->setTimezone('UTC');
             $fechaFin = $request->query('fecha_fin') 
-                ? Carbon::parse($request->query('fecha_fin'))->endOfDay() 
-                : now()->endOfDay();
+                ? Carbon::parse($request->query('fecha_fin'))->endOfDay()->setTimezone('UTC')
+                : now()->endOfDay()->setTimezone('UTC');
                 
             $trabajos = HistorialTrabajo::whereBetween('created_at', [$fechaInicio, $fechaFin])->get();
             
@@ -470,13 +559,16 @@ class DashboardController extends Controller
             foreach ($trabajos as $trabajo) {
                 $marca = $trabajo->marca ?: 'Sin especificar';
                 
-                // Calcular horas usando el método parseFecha
                 $entrada = $this->parseFecha($trabajo->fecha_ingreso, $trabajo->hora_creacion);
                 $salida = $this->parseFecha($trabajo->fecha_terminado, $trabajo->hora_terminado);
                 
                 if (!$entrada || !$salida) {
                     continue;
                 }
+                
+                // Asegurar zona horaria UTC
+                $entrada->setTimezone('UTC');
+                $salida->setTimezone('UTC');
                 
                 $minutos = $entrada->diffInMinutes($salida);
                 $horas = $minutos / 60;
@@ -497,10 +589,14 @@ class DashboardController extends Controller
             }
             
             arsort($horasPorMarca);
+            
+            // Tomar solo las primeras 10 marcas
+            $topMarcas = array_slice($horasPorMarca, 0, 10, true);
+            
             $data = array_map(
                 fn($marca, $horas) => ['marca' => $marca, 'horas' => round($horas, 2)], 
-                array_keys($horasPorMarca), 
-                $horasPorMarca
+                array_keys($topMarcas), 
+                $topMarcas
             );
             
             return response()->json(['success' => true, 'data' => $data]);
@@ -516,12 +612,12 @@ class DashboardController extends Controller
             ], 500);
         }
     }
-
     /**
-     * Obtener rendimiento de técnicos - CORREGIDO
+     * Obtener rendimiento de técnicos
      */
     public function technicianPerformance(Request $request)
     {
+        // ... (sin cambios, igual que antes)
         try {
             $fechaInicio = $request->query('fecha_inicio') 
                 ? Carbon::parse($request->query('fecha_inicio'))->startOfDay() 
@@ -641,9 +737,8 @@ class DashboardController extends Controller
     }
 
     /**
-     * Parsear fecha y hora del historial
-     * El formato de fecha es "d/m/Y" (ej: 9/5/2026)
-     * El formato de hora es "H:i:s" o "H:i" (ej: 09:13:00 o 09:13)
+     * Parsear fecha y hora del historial - FORZANDO FECHA EXACTA sin conversión de zona horaria
+     * El formato de fecha es "d/m/Y" (ej: 9/5/2026 o 04/05/2026)
      */
     private function parseFecha($fechaStr, $horaStr = null)
     {
@@ -652,34 +747,57 @@ class DashboardController extends Controller
         }
         
         try {
+            // Limpiar la fecha (eliminar espacios)
+            $fechaStr = trim($fechaStr);
+            
             // Parsear fecha en formato d/m/Y
             $partes = explode('/', $fechaStr);
             if (count($partes) !== 3) {
-                return null;
+                // Intentar con guiones
+                $partes = explode('-', $fechaStr);
+                if (count($partes) !== 3) {
+                    return null;
+                }
             }
             
             $dia = intval($partes[0]);
             $mes = intval($partes[1]);
             $año = intval($partes[2]);
             
+            // Validar que el año tenga 4 dígitos
+            if ($año < 1000 || $año > 9999) {
+                return null;
+            }
+            
             if (!checkdate($mes, $dia, $año)) {
                 return null;
             }
             
-            $fecha = Carbon::create($año, $mes, $dia, 0, 0, 0);
+            // IMPORTANTE: Usar createFromFormat para evitar conversiones de zona horaria
+            // Esto crea una fecha EXACTAMENTE con los valores proporcionados
+            $fechaStrCompleta = sprintf('%04d-%02d-%02d', $año, $mes, $dia);
             
             if ($horaStr) {
                 // Parsear hora en formato H:i:s o H:i
+                $horaStr = trim($horaStr);
                 $horaPartes = explode(':', $horaStr);
                 if (count($horaPartes) >= 2) {
                     $horas = intval($horaPartes[0]);
                     $minutos = intval($horaPartes[1]);
                     $segundos = count($horaPartes) >= 3 ? intval($horaPartes[2]) : 0;
-                    $fecha->setTime($horas, $minutos, $segundos);
+                    $fechaStrCompleta .= sprintf(' %02d:%02d:%02d', $horas, $minutos, $segundos);
+                } else {
+                    $fechaStrCompleta .= ' 00:00:00';
                 }
+            } else {
+                $fechaStrCompleta .= ' 00:00:00';
             }
             
+            // Usar createFromFormat sin zona horaria para evitar conversiones
+            $fecha = Carbon::createFromFormat('Y-m-d H:i:s', $fechaStrCompleta);
+            
             return $fecha;
+            
         } catch (\Exception $e) {
             \Illuminate\Support\Facades\Log::error('Error parseando fecha:', [
                 'fecha' => $fechaStr,
@@ -689,7 +807,6 @@ class DashboardController extends Controller
             return null;
         }
     }
-
     /**
      * Extraer todos los técnicos de un string
      */

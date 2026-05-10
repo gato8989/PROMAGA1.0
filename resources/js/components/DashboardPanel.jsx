@@ -323,44 +323,47 @@ const DashboardPanel = () => {
   // Gráfica de Tendencia (LÍNEA DOBLE - Sin relleno y menos curvatura)
   const trendChartData = {
     labels: trend?.map(t => {
-      const date = new Date(t.fecha);
-      return date.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' });
+        // FORZAR la fecha sin conversión de zona horaria
+        const [year, month, day] = t.fecha.split('-');
+        // Crear fecha en UTC para evitar desplazamiento
+        const date = new Date(Date.UTC(year, month - 1, day));
+        return date.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', timeZone: 'UTC' });
     }) || [],
     datasets: [
-      {
-        label: 'Vehículos',
-        data: trend?.map(t => t.vehiculos) || [],
-        borderColor: '#261472',
-        backgroundColor: 'transparent',
-        borderWidth: 3,
-        tension: 0.1,
-        fill: false,
-        pointBackgroundColor: '#261472',
-        pointBorderColor: '#fff',
-        pointBorderWidth: 2,
-        pointRadius: 4,
-        pointHoverRadius: 6,
-        pointHoverBackgroundColor: 'rgba(52, 152, 219, 0.9)',
-        yAxisID: 'y',
-      },
-      {
-        label: 'Horas Trabajadas',
-        data: trend?.map(t => t.horas) || [],
-        borderColor: '#e74c3c',
-        backgroundColor: 'transparent',
-        borderWidth: 3,
-        tension: 0.1,
-        fill: false,
-        pointBackgroundColor: '#c0392b',
-        pointBorderColor: '#fff',
-        pointBorderWidth: 2,
-        pointRadius: 4,
-        pointHoverRadius: 6,
-        pointHoverBackgroundColor: '#e74c3c',
-        yAxisID: 'y1',
-      }
+        {
+            label: 'Vehículos',
+            data: trend?.map(t => t.vehiculos) || [],
+            borderColor: '#261472',
+            backgroundColor: 'transparent',
+            borderWidth: 3,
+            tension: 0.1,
+            fill: false,
+            pointBackgroundColor: '#261472',
+            pointBorderColor: '#fff',
+            pointBorderWidth: 2,
+            pointRadius: 4,
+            pointHoverRadius: 6,
+            pointHoverBackgroundColor: 'rgba(52, 152, 219, 0.9)',
+            yAxisID: 'y',
+        },
+        {
+            label: 'Horas Trabajadas',
+            data: trend?.map(t => t.horas) || [],
+            borderColor: '#e74c3c',
+            backgroundColor: 'transparent',
+            borderWidth: 3,
+            tension: 0.1,
+            fill: false,
+            pointBackgroundColor: '#c0392b',
+            pointBorderColor: '#fff',
+            pointBorderWidth: 2,
+            pointRadius: 4,
+            pointHoverRadius: 6,
+            pointHoverBackgroundColor: '#e74c3c',
+            yAxisID: 'y1',
+        }
     ]
-  };
+};
 
   const trendChartOptions = {
     responsive: true,
@@ -386,35 +389,39 @@ const DashboardPanel = () => {
         }
       },
       tooltip: {
-        callbacks: {
+      callbacks: {
           label: function(context) {
-            let label = context.dataset.label || '';
-            if (label) {
-              label += ': ';
-            }
-            if (context.parsed.y !== null) {
-              if (context.dataset.label === 'Horas Trabajadas') {
-                label += context.parsed.y.toFixed(1) + ' horas';
-              } else {
-                label += context.parsed.y + ' vehículos';
+              let label = context.dataset.label || '';
+              if (label) {
+                  label += ': ';
               }
-            }
-            return label;
+              if (context.parsed.y !== null) {
+                  if (context.dataset.label === 'Horas Trabajadas') {
+                      label += context.parsed.y.toFixed(1) + ' horas';
+                  } else {
+                      label += context.parsed.y + ' vehículos';
+                  }
+              }
+              return label;
           },
           title: function(context) {
-            const originalDate = trend?.[context[0].dataIndex]?.fecha;
-            if (originalDate) {
-              const date = new Date(originalDate);
-              return date.toLocaleDateString('es-ES', { 
-                weekday: 'long', 
-                year: 'numeric', 
-                month: 'long', 
-                day: 'numeric' 
-              });
-            }
-            return context[0].label;
+              // Obtener la fecha original del trend
+              const fechaOriginal = trend?.[context[0].dataIndex]?.fecha;
+              if (fechaOriginal) {
+                  // Parsear correctamente sin conversión de zona horaria
+                  const [year, month, day] = fechaOriginal.split('-');
+                  const date = new Date(Date.UTC(year, month - 1, day));
+                  return date.toLocaleDateString('es-ES', { 
+                      weekday: 'long', 
+                      year: 'numeric', 
+                      month: 'long', 
+                      day: 'numeric',
+                      timeZone: 'UTC'
+                  });
+              }
+              return context[0].label;
           }
-        },
+      },
         backgroundColor: 'rgba(0,0,0,0.8)',
         titleColor: '#fff',
         bodyColor: '#fff',
