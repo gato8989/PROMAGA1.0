@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -7,8 +7,10 @@ use App\Http\Controllers\UserController;
 use App\Http\Controllers\TrabajoController;
 use App\Http\Controllers\VehicleController;
 use App\Http\Controllers\SSEController;
+use App\Http\Controllers\DashboardController;
 
-// Rutas para datos de vehículos
+
+// Rutas para datos de vehÃ­culos
 Route::get('/vehicles/makes', [VehicleController::class, 'getMakes']);
 Route::get('/vehicles/years/{make}', [VehicleController::class, 'getYears']);
 Route::get('/vehicles/models/{make}/{year}', [VehicleController::class, 'getModels']);
@@ -16,7 +18,7 @@ Route::get('/vehicles/search/{searchTerm}', [VehicleController::class, 'searchVe
 Route::get('/vehicles/status', [VehicleController::class, 'getApiStatus']);
 Route::post('/vehicles/refresh-cache', [VehicleController::class, 'refreshCache']);
 
-// Rutas públicas
+// Rutas pÃºblicas
 Route::post('/login', [AuthController::class, 'login']);
 
 // Rutas protegidas con Sanctum 
@@ -38,7 +40,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // Trabajos routes
     Route::get('/trabajos/last-update', function() {
         try {
-            // Obtener el último updated_at de TODOS los trabajos activos (no completados)
+            // Obtener el Ãºltimo updated_at de TODOS los trabajos activos (no completados)
             $lastUpdate = \App\Models\Trabajo::where('completado', false)->max('updated_at');
             
             // Si no hay trabajos activos, obtener de todos los trabajos
@@ -46,7 +48,7 @@ Route::middleware('auth:sanctum')->group(function () {
                 $lastUpdate = \App\Models\Trabajo::max('updated_at');
             }
             
-            // Si aún no hay trabajos, usar timestamp actual
+            // Si aÃºn no hay trabajos, usar timestamp actual
             if (!$lastUpdate) {
                 $lastUpdate = now();
             } else {
@@ -54,10 +56,10 @@ Route::middleware('auth:sanctum')->group(function () {
                 $lastUpdate = \Carbon\Carbon::parse($lastUpdate);
             }
             
-            // También obtener conteo de trabajos activos para mayor precisión
+            // TambiÃ©n obtener conteo de trabajos activos para mayor precisiÃ³n
             $trabajosCount = \App\Models\Trabajo::where('completado', false)->count();
             
-            // Crear un hash más robusto que incluya timestamp y conteo
+            // Crear un hash mÃ¡s robusto que incluya timestamp y conteo
             $stateHash = md5($lastUpdate->timestamp . '|' . $trabajosCount . '|' . $lastUpdate->format('Y-m-d H:i:s'));
 
             \Illuminate\Support\Facades\Log::info('State hash generado', [
@@ -74,7 +76,7 @@ Route::middleware('auth:sanctum')->group(function () {
                 'trabajos_count' => $trabajosCount,
                 'last_updated_at' => $lastUpdate->toISOString(),
                 'current_time' => now()->timestamp,
-                'message' => 'Última actualización obtenida',
+                'message' => 'Ãšltima actualizaciÃ³n obtenida',
                 'debug' => [
                     'last_updated_at' => $lastUpdate->toISOString(),
                     'trabajos_count' => $trabajosCount,
@@ -91,7 +93,7 @@ Route::middleware('auth:sanctum')->group(function () {
             
             return response()->json([
                 'success' => false,
-                'error' => 'Error obteniendo última actualización',
+                'error' => 'Error obteniendo Ãºltima actualizaciÃ³n',
                 'last_update' => time(),
                 'state_hash' => 'error_' . time()
             ], 500);
@@ -129,21 +131,21 @@ Route::middleware('auth:sanctum')->group(function () {
                 $query->where('modelo', 'like', "%{$request->modelo}%");
             }
 
-            // FILTRO MEJORADO: Búsqueda inteligente
+            // FILTRO MEJORADO: BÃºsqueda inteligente
             if ($request->has('busqueda') && $request->busqueda) {
                 $terminos = preg_split('/\s+/', trim($request->busqueda));
                 
                 $query->where(function($q) use ($terminos) {
                     foreach ($terminos as $termino) {
-                        // Limpiar el término de búsqueda
+                        // Limpiar el tÃ©rmino de bÃºsqueda
                         $terminoLimpio = trim($termino);
                         if (empty($terminoLimpio)) continue;
                         
-                        // Buscar en marca, modelo y año
+                        // Buscar en marca, modelo y aÃ±o
                         $q->where(function($subQuery) use ($terminoLimpio) {
                             $subQuery->where('marca', 'like', "%{$terminoLimpio}%")
                                     ->orWhere('modelo', 'like', "%{$terminoLimpio}%")
-                                    ->orWhere('año', 'like', "%{$terminoLimpio}%");
+                                    ->orWhere('aÃ±o', 'like', "%{$terminoLimpio}%");
                         });
                     }
                 });
@@ -165,7 +167,7 @@ Route::middleware('auth:sanctum')->group(function () {
             // Obtener el total antes de paginar (para el frontend)
             $total = $query->count();
             
-            // Aplicar paginación
+            // Aplicar paginaciÃ³n
             $page = $request->page ?? 1;
             $perPage = $request->per_page ?? 10;
             $offset = ($page - 1) * $perPage;
@@ -258,7 +260,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
             $trabajo = \App\Models\HistorialTrabajo::findOrFail($id);
             
-            // Validar que solo se envíen las notas
+            // Validar que solo se envÃ­en las notas
             $validated = $request->validate([
                 'notas' => 'nullable|string|max:1000'
             ]);
@@ -285,14 +287,14 @@ Route::middleware('auth:sanctum')->group(function () {
             ], 404);
             
         } catch (\Illuminate\Validation\ValidationException $e) {
-            \Illuminate\Support\Facades\Log::error('Error de validación al actualizar notas del historial:', [
+            \Illuminate\Support\Facades\Log::error('Error de validaciÃ³n al actualizar notas del historial:', [
                 'id' => $id,
                 'errors' => $e->errors()
             ]);
 
             return response()->json([
                 'success' => false,
-                'error' => 'Error de validación',
+                'error' => 'Error de validaciÃ³n',
                 'errors' => $e->errors()
             ], 422);
             
@@ -320,7 +322,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
             $trabajo = \App\Models\HistorialTrabajo::findOrFail($id);
             
-            // Validar que solo se envíen las notas
+            // Validar que solo se envÃ­en las notas
             $validated = $request->validate([
                 'notas' => 'nullable|string|max:1000'
             ]);
@@ -347,14 +349,14 @@ Route::middleware('auth:sanctum')->group(function () {
             ], 404);
             
         } catch (\Illuminate\Validation\ValidationException $e) {
-            \Illuminate\Support\Facades\Log::error('Error de validación al actualizar notas del historial (PATCH):', [
+            \Illuminate\Support\Facades\Log::error('Error de validaciÃ³n al actualizar notas del historial (PATCH):', [
                 'id' => $id,
                 'errors' => $e->errors()
             ]);
 
             return response()->json([
                 'success' => false,
-                'error' => 'Error de validación',
+                'error' => 'Error de validaciÃ³n',
                 'errors' => $e->errors()
             ], 422);
             
@@ -407,6 +409,48 @@ Route::middleware('auth:sanctum')->group(function () {
             ], 500);
         }
     });
+
+
+
+    // ==================== RUTAS DE CLIENTES ====================
+
+    Route::post('/clientes/{cliente}/recomendacion', [App\Http\Controllers\ClienteController::class, 'enviarRecomendacion']);
+
+    // Clientes CRUD
+    Route::get('/clientes', [App\Http\Controllers\ClienteController::class, 'index']);
+    Route::post('/clientes', [App\Http\Controllers\ClienteController::class, 'store']);
+    Route::put('/clientes/{cliente}', [App\Http\Controllers\ClienteController::class, 'update']);
+    Route::delete('/clientes/{cliente}', [App\Http\Controllers\ClienteController::class, 'destroy']);
+
+    // WhatsApp
+    Route::post('/clientes/{cliente}/recordatorio', [App\Http\Controllers\ClienteController::class, 'enviarRecordatorio']);
+    Route::post('/clientes/{cliente}/finalizacion', [App\Http\Controllers\ClienteController::class, 'enviarFinalizacion']);
+    Route::post('/clientes/{cliente}/garantia', [App\Http\Controllers\ClienteController::class, 'generarGarantia']);
+    Route::get('/clientes/whatsapp-status', [App\Http\Controllers\ClienteController::class, 'whatsappStatus']);
+    Route::post('/clientes/whatsapp-logout', [App\Http\Controllers\ClienteController::class, 'whatsappLogout']);
+
+    // Búsqueda de trabajos del historial
+    Route::get('/clientes/buscar-trabajos', [App\Http\Controllers\ClienteController::class, 'buscarTrabajosHistorial']);
+
+    // ==================== RUTAS DASHBOARD ====================
+
+    Route::get('/dashboard/technician-performance', [DashboardController::class, 'technicianPerformance']);
+    
+    Route::get('/dashboard/stats', [DashboardController::class, 'stats']);
+
+    Route::get('/dashboard/trend', [DashboardController::class, 'trend']);
+
+    Route::get('/dashboard/brands', [DashboardController::class, 'brands']);
+
+    Route::get('/dashboard/models', [DashboardController::class, 'models']);
+
+    Route::get('/dashboard/years', [DashboardController::class, 'years']);
+
+    Route::get('/dashboard/common-works', [DashboardController::class, 'commonWorks']);
+
+    Route::get('/dashboard/work-times', [DashboardController::class, 'workTimes']);
+    
+    Route::get('/dashboard/hours-by-brand', [DashboardController::class, 'hoursByBrand']);
 
 });
 

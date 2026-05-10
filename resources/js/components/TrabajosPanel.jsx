@@ -19,7 +19,10 @@ const TrabajosPanel = ({ user }) => {
         marca: '',
         año: '',
         modelo: '',
-        trabajos: ['']
+        trabajos: [''],
+        cliente_nombre: '',
+        cliente_telefono: '+52 ',
+        registrar_cliente: false
     });
     const [loading, setLoading] = useState(true);
 
@@ -38,7 +41,10 @@ const TrabajosPanel = ({ user }) => {
         año: '',
         trabajos: [],
         color: '#261472',
-        subtrabajos_seleccionados: {}
+        subtrabajos_seleccionados: {},
+        cliente_nombre: '',
+        cliente_telefono: '+52 ',
+        registrar_cliente: false
     });
     const [guardandoEdicion, setGuardandoEdicion] = useState(false);
 
@@ -103,7 +109,7 @@ const TrabajosPanel = ({ user }) => {
         }
     }, [forceRefresh]);
 
-    // Polling optimizado - CON INTERVALO ADAPTATIVO
+    // Polling optimizado
     const startPolling = () => {
         console.log('🟢 Iniciando polling adaptativo...');
         setPollingStatus('active');
@@ -113,173 +119,94 @@ const TrabajosPanel = ({ user }) => {
         }, getPollingInterval());
     };
 
-    // Intervalo de polling adaptativo
     const getPollingInterval = () => {
-        // Si hay muchos cambios recientes, verificar más frecuentemente
-        if (consecutiveUpdatesRef.current > 2) {
-            return 2000; // 2 segundos durante actividad alta
-        }
-        
-        // Si hay errores, aumentar el intervalo para dar tiempo al servidor
-        if (errorCountRef.current > 0) {
-            return 10000; // 10 segundos si hay errores
-        }
-        
-        return 5000; // 5 segundos por defecto (reducido de 3 segundos)
+        if (consecutiveUpdatesRef.current > 2) return 2000;
+        if (errorCountRef.current > 0) return 10000;
+        return 5000;
     };
 
-    // Función para verificar actualizaciones - OPTIMIZADA
     const checkForUpdates = async () => {
-        // Si ya está actualizando, saltar esta verificación
-        if (pollingStatus === 'updating') {
-            console.log('⏭️ Saltando verificación - ya se está actualizando');
-            return;
-        }
+        if (pollingStatus === 'updating') return;
 
         try {
-            console.log('🔍 Verificando actualizaciones...');
-            
             const token = localStorage.getItem('token');
             const response = await axios.get(`/api/trabajos/last-update?t=${Date.now()}`, {
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                },
-                timeout: 8000 // Timeout reducido
+                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                timeout: 8000
             });
 
             if (response.data.success) {
                 const serverStateHash = response.data.state_hash;
                 const currentStateHash = lastHashRef.current;
                 
-                console.log('🔍 State Hash - Servidor:', serverStateHash);
-                console.log('🔍 State Hash - Local:', currentStateHash);
-                
                 if (currentStateHash === null) {
-                    // Primera vez - inicializar
-                    console.log('📅 Inicializando state hash:', serverStateHash);
                     lastHashRef.current = serverStateHash;
                     setPollingStatus('active');
-                    errorCountRef.current = 0; // Resetear contador de errores
+                    errorCountRef.current = 0;
                 } else if (serverStateHash !== currentStateHash) {
-                    // ¡HAY CAMBIOS!
-                    console.log('🔄 CAMBIOS DETECTADOS! Actualizando...');
                     setPollingStatus('updating');
-                    
                     consecutiveUpdatesRef.current++;
-                    
-                    // Forzar recarga de trabajos
                     await fetchTrabajos();
-                    
-                    // Actualizar hash local
                     lastHashRef.current = serverStateHash;
                     setPollingStatus('active');
-                    console.log('✅ Actualización completada');
-                    
-                    // Reajustar intervalo si hay muchos cambios seguidos
-                    if (consecutiveUpdatesRef.current > 0) {
-                        adjustPollingInterval();
-                    }
+                    if (consecutiveUpdatesRef.current > 0) adjustPollingInterval();
                 } else {
-                    // Sin cambios - resetear contador de actualizaciones consecutivas
                     consecutiveUpdatesRef.current = 0;
-                    console.log('✅ No hay cambios');
                     setPollingStatus('active');
-                    errorCountRef.current = 0; // Resetear contador de errores
+                    errorCountRef.current = 0;
                 }
             } else {
-                console.log('❌ Error en respuesta del servidor');
                 handlePollingError();
             }
         } catch (error) {
-            console.log('❌ Error de conexión:', error.message);
             handlePollingError();
         }
     };
 
-    // Manejo de errores optimizado
     const handlePollingError = () => {
         errorCountRef.current++;
         setPollingStatus('error');
-        
-        // Si hay muchos errores consecutivos, aumentar el intervalo
         if (errorCountRef.current > 3) {
-            console.log('⚠️ Muchos errores, aumentando intervalo de polling...');
-            restartPollingWithNewInterval(15000); // 15 segundos
+            restartPollingWithNewInterval(15000);
         } else if (errorCountRef.current > 1) {
-            restartPollingWithNewInterval(10000); // 10 segundos
+            restartPollingWithNewInterval(10000);
         }
     };
 
-    // Reajustar intervalo de polling
     const adjustPollingInterval = () => {
-        if (consecutiveUpdatesRef.current > 5) {
-            console.log('🚀 Alta actividad, manteniendo polling rápido');
-        } else if (consecutiveUpdatesRef.current > 2) {
-            console.log('⚡ Actividad moderada, ajustando polling');
-        }
-        
-        // Reiniciar polling con nuevo intervalo
         restartPollingWithNewInterval(getPollingInterval());
     };
 
-    // Reiniciar polling con nuevo intervalo
     const restartPollingWithNewInterval = (newInterval) => {
-        if (pollingRef.current) {
-            clearInterval(pollingRef.current);
-        }
-        
-        console.log(`🔄 Reajustando intervalo de polling a ${newInterval}ms`);
-        pollingRef.current = setInterval(() => {
-            checkForUpdates();
-        }, newInterval);
+        if (pollingRef.current) clearInterval(pollingRef.current);
+        pollingRef.current = setInterval(() => { checkForUpdates(); }, newInterval);
     };
 
-    // Función para verificar si el usuario puede terminar trabajos
-    const canTerminarTrabajos = () => {
-        return user && (user.role === 'admin' || user.role === 'tecnico');
-    };
+    const canTerminarTrabajos = () => user && (user.role === 'admin' || user.role === 'tecnico');
+    const isAdmin = () => user && user.role === 'admin';
 
-    // Función para verificar si el usuario es administrador
-    const isAdmin = () => {
-        return user && user.role === 'admin';
-    };
-
-    // Verificar estado de la API NHTSA
     const checkApiStatus = async () => {
         try {
             const token = localStorage.getItem('token');
             const response = await axios.get('/api/vehicles/status', {
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                },
+                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
                 timeout: 5000
             });
-            
             setApiStatus(response.data.status);
         } catch (error) {
-            console.error('Error checking API status:', error);
             setApiStatus('offline');
         }
     };
 
-    // Cargar marcas desde la API NHTSA
     const fetchMarcas = async () => {
         try {
             setLoadingMarcas(true);
             const token = localStorage.getItem('token');
             const response = await axios.get('/api/vehicles/makes', {
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                },
+                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
                 timeout: 10000
             });
-
-            if (response.data.success) {
-                setMarcasData(response.data.data);
-            }
+            if (response.data.success) setMarcasData(response.data.data);
         } catch (error) {
             console.error('Error cargando marcas:', error);
         } finally {
@@ -287,27 +214,19 @@ const TrabajosPanel = ({ user }) => {
         }
     };
 
-    // Cargar años según la marca seleccionada
     const fetchAños = async (marca) => {
         if (!marca) {
             setAñosData([]);
             return;
         }
-
         try {
             setLoadingAños(true);
             const token = localStorage.getItem('token');
             const response = await axios.get(`/api/vehicles/years/${encodeURIComponent(marca)}`, {
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                },
+                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
                 timeout: 10000
             });
-
-            if (response.data.success) {
-                setAñosData(response.data.data);
-            }
+            if (response.data.success) setAñosData(response.data.data);
         } catch (error) {
             console.error('Error cargando años:', error);
             setAñosData([]);
@@ -316,27 +235,19 @@ const TrabajosPanel = ({ user }) => {
         }
     };
 
-    // Cargar modelos según marca y año seleccionados
     const fetchModelos = async (marca, año) => {
         if (!marca || !año) {
             setModelosData([]);
             return;
         }
-
         try {
             setLoadingModelos(true);
             const token = localStorage.getItem('token');
             const response = await axios.get(`/api/vehicles/models/${encodeURIComponent(marca)}/${año}`, {
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                },
+                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
                 timeout: 10000
             });
-
-            if (response.data.success) {
-                setModelosData(response.data.data);
-            }
+            if (response.data.success) setModelosData(response.data.data);
         } catch (error) {
             console.error('Error cargando modelos:', error);
             setModelosData([]);
@@ -345,22 +256,14 @@ const TrabajosPanel = ({ user }) => {
         }
     };
 
-    // Efectos para cargar datos dinámicamente
     useEffect(() => {
-        if (formData.marca) {
-            fetchAños(formData.marca);
-        } else {
-            setAñosData([]);
-            setModelosData([]);
-        }
+        if (formData.marca) fetchAños(formData.marca);
+        else { setAñosData([]); setModelosData([]); }
     }, [formData.marca]);
 
     useEffect(() => {
-        if (formData.marca && formData.año) {
-            fetchModelos(formData.marca, formData.año);
-        } else {
-            setModelosData([]);
-        }
+        if (formData.marca && formData.año) fetchModelos(formData.marca, formData.año);
+        else setModelosData([]);
     }, [formData.marca, formData.año]);
 
     const handleAbrirNotas = (trabajo) => {
@@ -371,28 +274,20 @@ const TrabajosPanel = ({ user }) => {
 
     const handleGuardarNotas = async () => {
         if (!currentNotasTrabajo) return;
-
         try {
             setGuardandoNotas(true);
             const token = localStorage.getItem('token');
-            
             const response = await axios.put(`/api/trabajos/${currentNotasTrabajo.id}/notas`, {
                 notas: notasText
             }, {
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                },
+                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
                 timeout: 10000
             });
-
             if (response.data.success) {
-                // Forzar actualización después de guardar notas
                 setForceRefresh(prev => prev + 1);
                 setShowNotasPopup(false);
             }
         } catch (error) {
-            console.error('Error guardando notas:', error);
             alert('Error al guardar las notas');
         } finally {
             setGuardandoNotas(false);
@@ -405,7 +300,6 @@ const TrabajosPanel = ({ user }) => {
         setNotasText('');
     };
 
-    // Funciones para edición
     const handleAbrirEdicion = (trabajo) => {
         setTrabajoEditando(trabajo);
         setFormDataEditar({
@@ -414,30 +308,24 @@ const TrabajosPanel = ({ user }) => {
             año: trabajo.año,
             trabajos: [...trabajo.trabajos],
             color: trabajo.color,
-            subtrabajos_seleccionados: { ...(trabajo.subtrabajos_seleccionados || {}) }
+            subtrabajos_seleccionados: { ...(trabajo.subtrabajos_seleccionados || {}) },
+            cliente_nombre: trabajo.cliente_nombre || '',
+            cliente_telefono: trabajo.cliente_telefono || '+52 ',
+            registrar_cliente: !!(trabajo.cliente_nombre || trabajo.cliente_telefono)
         });
         setShowEditarPopup(true);
     };
 
     const handleEditarChange = (field, value) => {
-        setFormDataEditar(prev => ({
-            ...prev,
-            [field]: value
-        }));
+        setFormDataEditar(prev => ({ ...prev, [field]: value }));
     };
 
-
-    // Función auxiliar para obtener subtrabajos
     const obtenerSubtrabajosPorTipo = (tipoTrabajo) => {
         switch(tipoTrabajo) {
-            case "Afinación":
-                return [...trabajosData.trabajosAfinacion];
-            case "Suspensión":
-                return [...trabajosData.trabajosSuspension];
-            case "Frenos":
-                return [...trabajosData.trabajosFrenos];
-            default:
-                return [];
+            case "Afinación": return [...trabajosData.trabajosAfinacion];
+            case "Suspensión": return [...trabajosData.trabajosSuspension];
+            case "Frenos": return [...trabajosData.trabajosFrenos];
+            default: return [];
         }
     };
 
@@ -445,129 +333,67 @@ const TrabajosPanel = ({ user }) => {
         const nuevosTrabajos = [...formDataEditar.trabajos];
         const trabajoAnterior = nuevosTrabajos[index];
         nuevosTrabajos[index] = value;
-        
         const nuevosSubtrabajos = { ...formDataEditar.subtrabajos_seleccionados };
         
         if (trabajoAnterior !== value) {
-            // Verificar si el trabajo anterior aún existe en otros índices
             const trabajoAnteriorAunExiste = nuevosTrabajos.some((t, i) => i !== index && t === trabajoAnterior);
+            if (!trabajoAnteriorAunExiste && trabajoAnterior in nuevosSubtrabajos) delete nuevosSubtrabajos[trabajoAnterior];
             
-            // Eliminar el trabajo anterior si ya no existe en ningún índice
-            if (!trabajoAnteriorAunExiste && trabajoAnterior in nuevosSubtrabajos) {
-                delete nuevosSubtrabajos[trabajoAnterior];
-            }
-            
-            // Configurar comportamiento automático para trabajos específicos
             if (["Afinación", "Suspensión", "Frenos"].includes(value)) {
-                if (value === "Afinación") {
-                    // AFINACIÓN y FRENOS: Marcar TODOS los subtrabajos automáticamente
-                    nuevosSubtrabajos[value] = obtenerSubtrabajosPorTipo(value);
-                }
-                if(value === "Frenos"){
-                    nuevosSubtrabajos[value] = obtenerSubtrabajosPorTipo(value);
-                } else {
-                    // SUSPENSIÓN NO marcar ningún subtrabajo
-                    nuevosSubtrabajos[value] = [];
-                }
+                nuevosSubtrabajos[value] = (value === "Afinación" || value === "Frenos") ? obtenerSubtrabajosPorTipo(value) : [];
             } else if (value.trim() !== "" && !(value in nuevosSubtrabajos)) {
                 nuevosSubtrabajos[value] = [];
             }
         }
-        
-        setFormDataEditar(prev => ({
-            ...prev,
-            trabajos: nuevosTrabajos,
-            subtrabajos_seleccionados: nuevosSubtrabajos
-        }));
+        setFormDataEditar(prev => ({ ...prev, trabajos: nuevosTrabajos, subtrabajos_seleccionados: nuevosSubtrabajos }));
     };
 
     const handleAgregarTrabajoEdicion = () => {
-        setFormDataEditar(prev => ({
-            ...prev,
-            trabajos: [...prev.trabajos, ''] 
-        }));
+        setFormDataEditar(prev => ({ ...prev, trabajos: [...prev.trabajos, ''] }));
     };
 
     const handleEliminarTrabajoEdicion = (index) => {
         const trabajoAEliminar = formDataEditar.trabajos[index];
         const nuevosTrabajos = formDataEditar.trabajos.filter((_, i) => i !== index);
         const nuevosSubtrabajos = { ...formDataEditar.subtrabajos_seleccionados };
-        
-        // Verificar si el trabajo eliminado aún existe en otros índices
         const existeTrabajo = nuevosTrabajos.includes(trabajoAEliminar);
-        if (!existeTrabajo && trabajoAEliminar in nuevosSubtrabajos) {
-            delete nuevosSubtrabajos[trabajoAEliminar];
-        }
-        
-        setFormDataEditar(prev => ({
-            ...prev,
-            trabajos: nuevosTrabajos,
-            subtrabajos_seleccionados: nuevosSubtrabajos
-        }));
+        if (!existeTrabajo && trabajoAEliminar in nuevosSubtrabajos) delete nuevosSubtrabajos[trabajoAEliminar];
+        setFormDataEditar(prev => ({ ...prev, trabajos: nuevosTrabajos, subtrabajos_seleccionados: nuevosSubtrabajos }));
     };
 
     const handleToggleSubtrabajoEdicion = (trabajoType, subtrabajo, checked) => {
         setFormDataEditar(prev => {
             const subtrabajosActuales = prev.subtrabajos_seleccionados[trabajoType] || [];
-            let nuevosSubtrabajos;
-            
-            if (checked) {
-                nuevosSubtrabajos = [...subtrabajosActuales, subtrabajo];
-            } else {
-                nuevosSubtrabajos = subtrabajosActuales.filter(st => st !== subtrabajo);
-            }
-            
-            return {
-                ...prev,
-                subtrabajos_seleccionados: {
-                    ...prev.subtrabajos_seleccionados,
-                    [trabajoType]: nuevosSubtrabajos
-                }
-            };
+            const nuevosSubtrabajos = checked ? [...subtrabajosActuales, subtrabajo] : subtrabajosActuales.filter(st => st !== subtrabajo);
+            return { ...prev, subtrabajos_seleccionados: { ...prev.subtrabajos_seleccionados, [trabajoType]: nuevosSubtrabajos } };
         });
     };
 
-    // Función de guardar edición
     const handleGuardarEdicion = async () => {
         if (!trabajoEditando) return;
-
         try {
             setGuardandoEdicion(true);
             const token = localStorage.getItem('token');
-
             const datosActualizados = {
                 marca: formDataEditar.marca,
                 modelo: formDataEditar.modelo,
                 año: formDataEditar.año,
                 trabajos: formDataEditar.trabajos.filter(t => t.trim() !== ''),
                 color: formDataEditar.color,
-                subtrabajos_seleccionados: formDataEditar.subtrabajos_seleccionados
+                subtrabajos_seleccionados: formDataEditar.subtrabajos_seleccionados,
+                cliente_nombre: formDataEditar.registrar_cliente ? formDataEditar.cliente_nombre : null,
+                cliente_telefono: formDataEditar.registrar_cliente ? formDataEditar.cliente_telefono : null
             };
-
-            console.log('💾 Guardando cambios...');
-
             const response = await axios.put(`/api/trabajos/${trabajoEditando.id}`, datosActualizados, {
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                },
+                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
                 timeout: 10000
             });
-
             if (response.data.success) {
-                console.log('✅ Cambios guardados');
-                
-                // Forzar actualización inmediata después de editar
                 setForceRefresh(prev => prev + 1);
-                
                 setShowEditarPopup(false);
                 setTrabajoEditando(null);
-                
-            } else {
-                throw new Error(response.data.error || 'Error desconocido del servidor');
             }
         } catch (error) {
-            console.error('❌ Error guardando edición:', error);
             alert('Error al guardar los cambios: ' + (error.response?.data?.error || error.message));
         } finally {
             setGuardandoEdicion(false);
@@ -582,49 +408,24 @@ const TrabajosPanel = ({ user }) => {
             modelo: '',
             año: '',
             trabajos: [],
-            subtrabajos_seleccionados: {}
+            subtrabajos_seleccionados: {},
+            cliente_nombre: '',
+            cliente_telefono: '+52 ',
+            registrar_cliente: false
         });
     };
 
-    // Cargar trabajos desde la API - OPTIMIZADA
     const fetchTrabajos = async () => {
         try {
-            console.log('🔄 Cargando trabajos...');
             setLoading(true);
             const token = localStorage.getItem('token');
-            
             const response = await axios.get(`/api/trabajos?t=${Date.now()}`, {
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                },
+                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
                 timeout: 10000
             });
-
             if (response.data.success) {
                 const trabajosFromAPI = response.data.data;
-                console.log('📥 Trabajos recibidos:', trabajosFromAPI.length);
-                
-                // Obtener el state_hash actualizado
-                try {
-                    const hashResponse = await axios.get(`/api/trabajos/last-update?t=${Date.now()}`, {
-                        headers: {
-                            'Authorization': `Bearer ${token}`,
-                            'Content-Type': 'application/json'
-                        },
-                        timeout: 5000
-                    });
-                    
-                    if (hashResponse.data.success) {
-                        lastHashRef.current = hashResponse.data.state_hash;
-                        console.log('🔐 State hash actualizado');
-                    }
-                } catch (hashError) {
-                    console.log('⚠️ Error obteniendo state hash, continuando...');
-                }
-                
                 const newSections = Array(9).fill(null);
-                
                 trabajosFromAPI.forEach((trabajo, index) => {
                     if (index < 9) {
                         newSections[index] = {
@@ -637,16 +438,16 @@ const TrabajosPanel = ({ user }) => {
                             fechaIngreso: trabajo.fecha_ingreso,
                             subtrabajosEstado: { ...trabajo.subtrabajos_estado },
                             notas: trabajo.notas || '',
-                            subtrabajos_seleccionados: { ...trabajo.subtrabajos_seleccionados }
+                            subtrabajos_seleccionados: { ...trabajo.subtrabajos_seleccionados },
+                            cliente_nombre: trabajo.cliente_nombre || null,
+                            cliente_telefono: trabajo.cliente_telefono || null
                         };
                     }
                 });
-                
-                console.log('🆕 Sections actualizadas:', newSections.filter(s => s !== null).length, 'trabajos');
                 setSections(newSections);
             }
         } catch (error) {
-            console.error('❌ Error cargando trabajos:', error);
+            console.error('Error cargando trabajos:', error);
         } finally {
             setLoading(false);
         }
@@ -654,14 +455,9 @@ const TrabajosPanel = ({ user }) => {
 
     const getAddButtonPosition = () => {
         const hasTrabajos = sections.some(section => section !== null);
-        if (!hasTrabajos) {
-            return 0;
-        }
-
+        if (!hasTrabajos) return 0;
         for (let i = 0; i < sections.length; i++) {
-            if (sections[i] === null) {
-                return i;
-            }
+            if (sections[i] === null) return i;
         }
         return -1;
     };
@@ -673,7 +469,10 @@ const TrabajosPanel = ({ user }) => {
             marca: '',
             año: '',
             modelo: '',
-            trabajos: ['']
+            trabajos: [''],
+            cliente_nombre: '',
+            cliente_telefono: '+52 ',
+            registrar_cliente: false
         });
         setTrabajosActivosForm({
             trabajosActivosAfinacion: [],
@@ -683,113 +482,62 @@ const TrabajosPanel = ({ user }) => {
     };
 
     const handleAddTrabajoField = () => {
-        setFormData(prev => ({
-            ...prev,
-            trabajos: [...prev.trabajos, '']
-        }));
+        setFormData(prev => ({ ...prev, trabajos: [...prev.trabajos, ''] }));
     };
 
     const handleInputChange = (field, value, index = null) => {
+        if (field === 'registrar_cliente') {
+            setFormData(prev => ({ ...prev, [field]: value }));
+            return;
+        }
+        
         if (index !== null) {
             const newTrabajos = [...formData.trabajos];
             newTrabajos[index] = value;
             setFormData(prev => ({ ...prev, trabajos: newTrabajos }));
-
             if (value === "Afinación") {
-                setTrabajosActivosForm(prev => ({
-                    ...prev,
-                    trabajosActivosAfinacion: [...trabajosData.trabajosAfinacion]
-                }));
+                setTrabajosActivosForm(prev => ({ ...prev, trabajosActivosAfinacion: [...trabajosData.trabajosAfinacion] }));
             } else if (value === "Frenos") {
-                setTrabajosActivosForm(prev => ({
-                    ...prev,
-                    trabajosActivosFrenos: [...trabajosData.trabajosFrenos]
-                }));
+                setTrabajosActivosForm(prev => ({ ...prev, trabajosActivosFrenos: [...trabajosData.trabajosFrenos] }));
             } else if (value === "Suspensión") {
-                setTrabajosActivosForm(prev => ({
-                    ...prev,
-                    trabajosActivosSuspension: []
-                }));
+                setTrabajosActivosForm(prev => ({ ...prev, trabajosActivosSuspension: [] }));
             }
+        } else if (field === 'cliente_telefono') {
+            let valor = value;
+            if (valor.trim() === '') valor = '+52 ';
+            setFormData(prev => ({ ...prev, [field]: valor }));
         } else {
-            setFormData(prev => ({ 
-                ...prev, 
-                [field]: value,
-                ...(field === 'marca' && { año: '', modelo: '' }),
-                ...(field === 'año' && { modelo: '' })
-            }));
+            setFormData(prev => ({ ...prev, [field]: value, ...(field === 'marca' && { año: '', modelo: '' }), ...(field === 'año' && { modelo: '' }) }));
         }
     };
 
     const handleSubtrabajoChangeForm = (trabajoType, subtrabajo, checked) => {
         setTrabajosActivosForm(prev => {
             const key = `trabajosActivos${trabajoType}`;
-            if (checked) {
-                return {
-                    ...prev,
-                    [key]: [...prev[key], subtrabajo]
-                };
-            } else {
-                return {
-                    ...prev,
-                    [key]: prev[key].filter(item => item !== subtrabajo)
-                };
-            }
+            return checked ? { ...prev, [key]: [...prev[key], subtrabajo] } : { ...prev, [key]: prev[key].filter(item => item !== subtrabajo) };
         });
     };
     
-    // FUNCIÓN ACTUALIZADA: Incluye información del usuario
     const handleSubtrabajoEstadoChange = async (trabajoId, subtrabajo, isGreen) => {
         try {
-            // ACTUALIZAR ESTADO LOCAL INMEDIATAMENTE
-            setSections(prevSections => {
-                return prevSections.map(section => {
-                    if (section && section.id === trabajoId) {
-                        return {
-                            ...section,
-                            subtrabajosEstado: {
-                                ...section.subtrabajosEstado,
-                                [subtrabajo]: isGreen
-                            }
-                        };
-                    }
-                    return section;
-                });
-            });
-
+            setSections(prevSections => prevSections.map(section => {
+                if (section && section.id === trabajoId) {
+                    return { ...section, subtrabajosEstado: { ...section.subtrabajosEstado, [subtrabajo]: isGreen } };
+                }
+                return section;
+            }));
             const token = localStorage.getItem('token');
-            await axios.put(`/api/trabajos/${trabajoId}/subtrabajo`, {
-                subtrabajo: subtrabajo,
-                estado: isGreen
-            }, {
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                },
+            await axios.put(`/api/trabajos/${trabajoId}/subtrabajo`, { subtrabajo: subtrabajo, estado: isGreen }, {
+                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
                 timeout: 8000
             });
-
-            console.log(`✅ Estado cambiado a ${isGreen ? 'verde' : 'rojo'} por ${user.name}, el polling se encargará de la sincronización`);
-
         } catch (error) {
-            console.error('Error actualizando subtrabajo:', error);
-            
-            // REVERTIR EL CAMBIO EN CASO DE ERROR
-            setSections(prevSections => {
-                return prevSections.map(section => {
-                    if (section && section.id === trabajoId) {
-                        return {
-                            ...section,
-                            subtrabajosEstado: {
-                                ...section.subtrabajosEstado,
-                                [subtrabajo]: !isGreen // Revertir al estado anterior
-                            }
-                        };
-                    }
-                    return section;
-                });
-            });
-            
+            setSections(prevSections => prevSections.map(section => {
+                if (section && section.id === trabajoId) {
+                    return { ...section, subtrabajosEstado: { ...section.subtrabajosEstado, [subtrabajo]: !isGreen } };
+                }
+                return section;
+            }));
             alert('Error al actualizar el estado del trabajo');
         }
     };
@@ -799,46 +547,72 @@ const TrabajosPanel = ({ user }) => {
         return section ? section.subtrabajosEstado[subtrabajo] || false : false;
     };
 
+    const registrarClienteDesdeTrabajo = async (trabajo) => {
+        try {
+            const token = localStorage.getItem('token');
+            const historialTrabajoId = trabajo.historial_id;
+            
+            if (!historialTrabajoId) {
+                console.error('No se recibió historial_id');
+                return false;
+            }
+            
+            let telefonoLimpio = trabajo.cliente_telefono.trim();
+            if (!telefonoLimpio.startsWith('+')) {
+                telefonoLimpio = '+52 ' + telefonoLimpio.replace(/\s/g, '');
+            }
+            
+            const clienteData = {
+                nombre: trabajo.cliente_nombre,
+                telefono: telefonoLimpio,
+                historial_trabajo_id: historialTrabajoId
+            };
+            
+            const responseCliente = await axios.post('/api/clientes', clienteData, {
+                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
+            });
+            
+            return responseCliente.data.success;
+        } catch (error) {
+            console.error('Error registrando cliente:', error.response?.data || error.message);
+            return false;
+        }
+    };
+
     const handleSubmit = async (e) => {
         e.preventDefault();
         
         if (currentSection !== null && formData.marca && formData.modelo && formData.año && formData.trabajos.some(t => t)) {
             try {
                 const token = localStorage.getItem('token');
-                
                 const subtrabajosSeleccionadosData = {};
-                
                 formData.trabajos.forEach(trabajo => {
-                    if (trabajo === "Afinación") {
-                        subtrabajosSeleccionadosData["Afinación"] = trabajosActivosForm.trabajosActivosAfinacion;
-                    } else if (trabajo === "Suspensión") {
-                        subtrabajosSeleccionadosData["Suspensión"] = trabajosActivosForm.trabajosActivosSuspension;
-                    } else if (trabajo === "Frenos") {
-                        subtrabajosSeleccionadosData["Frenos"] = trabajosActivosForm.trabajosActivosFrenos;
-                    }
+                    if (trabajo === "Afinación") subtrabajosSeleccionadosData["Afinación"] = trabajosActivosForm.trabajosActivosAfinacion;
+                    else if (trabajo === "Suspensión") subtrabajosSeleccionadosData["Suspensión"] = trabajosActivosForm.trabajosActivosSuspension;
+                    else if (trabajo === "Frenos") subtrabajosSeleccionadosData["Frenos"] = trabajosActivosForm.trabajosActivosFrenos;
                 });
 
-                const response = await axios.post('/api/trabajos', {
+                const trabajoData = {
                     marca: formData.marca,
                     modelo: formData.modelo,
                     año: formData.año,
                     trabajos: formData.trabajos.filter(t => t),
                     fecha_ingreso: new Date().toLocaleDateString('es-ES'),
-                    subtrabajos_seleccionados: subtrabajosSeleccionadosData
-                }, {
-                    headers: {
-                        'Authorization': `Bearer ${token}`,
-                        'Content-Type': 'application/json'
-                    },
+                    subtrabajos_seleccionados: subtrabajosSeleccionadosData,
+                    cliente_nombre: formData.registrar_cliente ? formData.cliente_nombre : null,
+                    cliente_telefono: formData.registrar_cliente ? formData.cliente_telefono : null
+                };
+
+                const response = await axios.post('/api/trabajos', trabajoData, {
+                    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
                     timeout: 10000
                 });
 
                 if (response.data.success) {
-                    // Forzar actualización después de crear
                     setForceRefresh(prev => prev + 1);
                     setShowPopup(false);
+                    setFormData(prev => ({ ...prev, cliente_nombre: '', cliente_telefono: '+52 ', registrar_cliente: false }));
                 }
-
             } catch (error) {
                 console.error('Error creando trabajo:', error);
                 alert('Error al crear el trabajo');
@@ -851,45 +625,45 @@ const TrabajosPanel = ({ user }) => {
         if (!section) return;
 
         const allSubtrabajos = [];
-        
         section.trabajos.forEach(trabajo => {
             if (trabajo === "Afinación") {
-                const subtrabajos = section.subtrabajos_seleccionados?.["Afinación"] || trabajosData.trabajosAfinacion;
-                allSubtrabajos.push(...subtrabajos);
+                allSubtrabajos.push(...(section.subtrabajos_seleccionados?.["Afinación"] || trabajosData.trabajosAfinacion));
             } else if (trabajo === "Suspensión") {
-                const subtrabajos = section.subtrabajos_seleccionados?.["Suspensión"] || trabajosData.trabajosSuspension;
-                allSubtrabajos.push(...subtrabajos);
+                allSubtrabajos.push(...(section.subtrabajos_seleccionados?.["Suspensión"] || trabajosData.trabajosSuspension));
             } else if (trabajo === "Frenos") {
-                const subtrabajos = section.subtrabajos_seleccionados?.["Frenos"] || trabajosData.trabajosFrenos;
-                allSubtrabajos.push(...subtrabajos);
+                allSubtrabajos.push(...(section.subtrabajos_seleccionados?.["Frenos"] || trabajosData.trabajosFrenos));
             } else {
                 allSubtrabajos.push(trabajo);
             }
         });
 
-        const allGreen = allSubtrabajos.every(subtrabajo => 
-            getBottonEstado(trabajoId, subtrabajo)
-        );
+        const allGreen = allSubtrabajos.every(subtrabajo => getBottonEstado(trabajoId, subtrabajo));
 
         if (allGreen) {
             try {
                 const token = localStorage.getItem('token');
+                const clienteNombre = section.cliente_nombre;
+                const clienteTelefono = section.cliente_telefono;
+                
                 const response = await axios.delete(`/api/trabajos/${trabajoId}`, {
-                    headers: {
-                        'Authorization': `Bearer ${token}`,
-                        'Content-Type': 'application/json'
-                    },
+                    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
                     timeout: 10000
                 });
 
                 if (response.data.success) {
-                    // Forzar actualización después de eliminar
+                    if (clienteNombre && clienteTelefono && clienteTelefono !== '+52 ') {
+                        const trabajoData = {
+                            marca: section.marca,
+                            modelo: section.modelo,
+                            año: section.año,
+                            cliente_nombre: clienteNombre,
+                            cliente_telefono: clienteTelefono,
+                            historial_id: response.data.historial_id
+                        };
+                        await registrarClienteDesdeTrabajo(trabajoData);
+                    }
                     setForceRefresh(prev => prev + 1);
-                } else {
-                    console.error('Error del servidor:', response.data);
-                    alert('Error del servidor: ' + (response.data.error || 'Error desconocido'));
                 }
-
             } catch (error) {
                 console.error('Error terminando trabajo:', error);
                 alert('Error al terminar el trabajo: ' + (error.response?.data?.error || error.message));
@@ -901,7 +675,6 @@ const TrabajosPanel = ({ user }) => {
 
     const renderSubtrabajos = (trabajoId, trabajo, index) => {
         const section = sections.find(s => s && s.id === trabajoId);
-        
         switch(trabajo) {
             case "Afinación":
                 const subtrabajosAfinacion = section?.subtrabajos_seleccionados?.["Afinación"] || trabajosData.trabajosAfinacion;
@@ -909,13 +682,7 @@ const TrabajosPanel = ({ user }) => {
                     <div key={`afinacion-${index}`} className="subtrabajos-container">
                         <div className="custom-content-trabajo">Afinación</div>
                         {subtrabajosAfinacion.map((subtrabajo, subIndex) => (
-                            <SubtrabajoItem 
-                                key={subIndex} 
-                                trabajoId={trabajoId}
-                                subtrabajo={subtrabajo}
-                                isGreen={getBottonEstado(trabajoId, subtrabajo)}
-                                onToggle={(isGreen) => handleSubtrabajoEstadoChange(trabajoId, subtrabajo, isGreen)}
-                            />
+                            <SubtrabajoItem key={subIndex} trabajoId={trabajoId} subtrabajo={subtrabajo} isGreen={getBottonEstado(trabajoId, subtrabajo)} onToggle={(isGreen) => handleSubtrabajoEstadoChange(trabajoId, subtrabajo, isGreen)} />
                         ))}
                     </div>
                 );
@@ -925,13 +692,7 @@ const TrabajosPanel = ({ user }) => {
                     <div key={`suspension-${index}`} className="subtrabajos-container">
                         <div className="custom-content-trabajo">Suspensión</div>
                         {subtrabajosSuspension.map((subtrabajo, subIndex) => (
-                            <SubtrabajoItem 
-                                key={subIndex} 
-                                trabajoId={trabajoId}
-                                subtrabajo={subtrabajo}
-                                isGreen={getBottonEstado(trabajoId, subtrabajo)}
-                                onToggle={(isGreen) => handleSubtrabajoEstadoChange(trabajoId, subtrabajo, isGreen)}
-                            />
+                            <SubtrabajoItem key={subIndex} trabajoId={trabajoId} subtrabajo={subtrabajo} isGreen={getBottonEstado(trabajoId, subtrabajo)} onToggle={(isGreen) => handleSubtrabajoEstadoChange(trabajoId, subtrabajo, isGreen)} />
                         ))}
                     </div>
                 );
@@ -941,166 +702,49 @@ const TrabajosPanel = ({ user }) => {
                     <div key={`frenos-${index}`} className="subtrabajos-container">
                         <div className="custom-content-trabajo">Frenos</div>
                         {subtrabajosFrenos.map((subtrabajo, subIndex) => (
-                            <SubtrabajoItem 
-                                key={subIndex} 
-                                trabajoId={trabajoId}
-                                subtrabajo={subtrabajo}
-                                isGreen={getBottonEstado(trabajoId, subtrabajo)}
-                                onToggle={(isGreen) => handleSubtrabajoEstadoChange(trabajoId, subtrabajo, isGreen)}
-                            />
+                            <SubtrabajoItem key={subIndex} trabajoId={trabajoId} subtrabajo={subtrabajo} isGreen={getBottonEstado(trabajoId, subtrabajo)} onToggle={(isGreen) => handleSubtrabajoEstadoChange(trabajoId, subtrabajo, isGreen)} />
                         ))}
                     </div>
                 );
             default:
-                return (
-                    <SubtrabajoItem 
-                        key={`default-${index}`}
-                        trabajoId={trabajoId}
-                        subtrabajo={trabajo}
-                        isGreen={getBottonEstado(trabajoId, trabajo)}
-                        onToggle={(isGreen) => handleSubtrabajoEstadoChange(trabajoId, trabajo, isGreen)}
-                    />
-                );
+                return <SubtrabajoItem key={`default-${index}`} trabajoId={trabajoId} subtrabajo={trabajo} isGreen={getBottonEstado(trabajoId, trabajo)} onToggle={(isGreen) => handleSubtrabajoEstadoChange(trabajoId, trabajo, isGreen)} />;
         }
     };
 
     const addButtonPosition = getAddButtonPosition();
 
-    const PollingStatusIndicator = () => {
-        const getStatusInfo = () => {
-            switch(pollingStatus) {
-                case 'active':
-                    return { text: '🟢 Sincronizado', color: 'connected' };
-                case 'updating':
-                    return { text: '🔄 Actualizando...', color: 'updating' };
-                case 'error':
-                    return { text: '⚠️ Error de conexión', color: 'error' };
-                default:
-                    return { text: '⚪ Inactivo', color: 'inactive' };
-            }
-        };
-
-        const status = getStatusInfo();
-
-        return (
-            <div className={`polling-status ${status.color}`}>
-                {status.text}
-                {errorCountRef.current > 0 && (
-                    <span className="error-count"> ({errorCountRef.current})</span>
-                )}
-            </div>
-        );
-    };
-
-    if (loading) {
-        return (
-            <div className="loading">
-                Cargando trabajos...
-            </div>
-        );
-    }
+    if (loading) return <div className="loading">Cargando trabajos...</div>;
 
     return (
-        <div className="dashboard-panel">  
+        <div className="dashboard-panel">
             <div className="trabajos-grid">
                 <div className="row rowcustom">
                     {[0, 1, 2].map(index => (
-                        <TrabajoSection 
-                            key={index}
-                            index={index}
-                            data={sections[index]}
-                            showAddButton={index === addButtonPosition}
-                            onAddTrabajo={handleAddTrabajo}
-                            onTerminarTrabajo={handleTerminarTrabajo}
-                            onAbrirNotas={handleAbrirNotas}
-                            onAbrirEdicion={handleAbrirEdicion}
-                            renderSubtrabajos={renderSubtrabajos}
-                            canTerminar={canTerminarTrabajos()}
-                            isAdmin={isAdmin()}
-                        />
+                        <TrabajoSection key={index} index={index} data={sections[index]} showAddButton={index === addButtonPosition} onAddTrabajo={handleAddTrabajo} onTerminarTrabajo={handleTerminarTrabajo} onAbrirNotas={handleAbrirNotas} onAbrirEdicion={handleAbrirEdicion} renderSubtrabajos={renderSubtrabajos} canTerminar={canTerminarTrabajos()} isAdmin={isAdmin()} />
                     ))}
                 </div>
                 <div className="row rowcustom">
                     {[3, 4, 5].map(index => (
-                        <TrabajoSection 
-                            key={index}
-                            index={index}
-                            data={sections[index]}
-                            showAddButton={index === addButtonPosition}
-                            onAddTrabajo={handleAddTrabajo}
-                            onTerminarTrabajo={handleTerminarTrabajo}
-                            onAbrirNotas={handleAbrirNotas}
-                            onAbrirEdicion={handleAbrirEdicion}
-                            renderSubtrabajos={renderSubtrabajos}
-                            canTerminar={canTerminarTrabajos()}
-                            isAdmin={isAdmin()}
-                        />
+                        <TrabajoSection key={index} index={index} data={sections[index]} showAddButton={index === addButtonPosition} onAddTrabajo={handleAddTrabajo} onTerminarTrabajo={handleTerminarTrabajo} onAbrirNotas={handleAbrirNotas} onAbrirEdicion={handleAbrirEdicion} renderSubtrabajos={renderSubtrabajos} canTerminar={canTerminarTrabajos()} isAdmin={isAdmin()} />
                     ))}
                 </div>
                 <div className="row rowcustom">
                     {[6, 7, 8].map(index => (
-                        <TrabajoSection 
-                            key={index}
-                            index={index}
-                            data={sections[index]}
-                            showAddButton={index === addButtonPosition}
-                            onAddTrabajo={handleAddTrabajo}
-                            onTerminarTrabajo={handleTerminarTrabajo}
-                            onAbrirNotas={handleAbrirNotas}
-                            onAbrirEdicion={handleAbrirEdicion}
-                            renderSubtrabajos={renderSubtrabajos}
-                            canTerminar={canTerminarTrabajos()}
-                            isAdmin={isAdmin()}
-                        />
+                        <TrabajoSection key={index} index={index} data={sections[index]} showAddButton={index === addButtonPosition} onAddTrabajo={handleAddTrabajo} onTerminarTrabajo={handleTerminarTrabajo} onAbrirNotas={handleAbrirNotas} onAbrirEdicion={handleAbrirEdicion} renderSubtrabajos={renderSubtrabajos} canTerminar={canTerminarTrabajos()} isAdmin={isAdmin()} />
                     ))}
                 </div>
             </div>
 
             {showPopup && (
-                <TrabajoPopup 
-                    formData={formData}
-                    marcasData={marcasData}
-                    añosData={añosData}
-                    modelosData={modelosData}
-                    loadingMarcas={loadingMarcas}
-                    loadingAños={loadingAños}
-                    loadingModelos={loadingModelos}
-                    apiStatus={apiStatus}
-                    trabajosData={trabajosData}
-                    trabajosActivosForm={trabajosActivosForm}
-                    onInputChange={handleInputChange}
-                    onAddTrabajoField={handleAddTrabajoField}
-                    onSubtrabajoChange={handleSubtrabajoChangeForm}
-                    onSubmit={handleSubmit}
-                    onClose={() => setShowPopup(false)}
-                />
+                <TrabajoPopup formData={formData} marcasData={marcasData} añosData={añosData} modelosData={modelosData} loadingMarcas={loadingMarcas} loadingAños={loadingAños} loadingModelos={loadingModelos} apiStatus={apiStatus} trabajosData={trabajosData} trabajosActivosForm={trabajosActivosForm} onInputChange={handleInputChange} onAddTrabajoField={handleAddTrabajoField} onSubtrabajoChange={handleSubtrabajoChangeForm} onSubmit={handleSubmit} onClose={() => setShowPopup(false)} />
             )}
 
             {showNotasPopup && (
-                <NotasPopup 
-                    notas={notasText}
-                    onNotasChange={setNotasText}
-                    onGuardar={handleGuardarNotas}
-                    onCancelar={handleCancelarNotas}
-                    guardando={guardandoNotas}
-                    vehiculo={currentNotasTrabajo ? `${currentNotasTrabajo.marca} ${currentNotasTrabajo.modelo} ${currentNotasTrabajo.año}` : ''}
-                />
+                <NotasPopup notas={notasText} onNotasChange={setNotasText} onGuardar={handleGuardarNotas} onCancelar={handleCancelarNotas} guardando={guardandoNotas} vehiculo={currentNotasTrabajo ? `${currentNotasTrabajo.marca} ${currentNotasTrabajo.modelo} ${currentNotasTrabajo.año}` : ''} />
             )}
 
             {showEditarPopup && (
-                <EditarPopup 
-                    formData={formDataEditar}
-                    trabajosData={trabajosData}
-                    onInputChange={handleEditarChange}
-                    onTrabajoChange={handleTrabajoEdicionChange}
-                    onAgregarTrabajo={handleAgregarTrabajoEdicion}
-                    onEliminarTrabajo={handleEliminarTrabajoEdicion}
-                    onToggleSubtrabajo={handleToggleSubtrabajoEdicion}
-                    onGuardar={handleGuardarEdicion}
-                    onCancelar={handleCancelarEdicion}
-                    guardando={guardandoEdicion}
-                    vehiculo={trabajoEditando ? `${trabajoEditando.marca} ${trabajoEditando.modelo} ${trabajoEditando.año}` : ''}
-                />
+                <EditarPopup formData={formDataEditar} trabajosData={trabajosData} onInputChange={handleEditarChange} onTrabajoChange={handleTrabajoEdicionChange} onAgregarTrabajo={handleAgregarTrabajoEdicion} onEliminarTrabajo={handleEliminarTrabajoEdicion} onToggleSubtrabajo={handleToggleSubtrabajoEdicion} onGuardar={handleGuardarEdicion} onCancelar={handleCancelarEdicion} guardando={guardandoEdicion} vehiculo={trabajoEditando ? `${trabajoEditando.marca} ${trabajoEditando.modelo} ${trabajoEditando.año}` : ''} />
             )}
         </div>
     );
@@ -1114,44 +758,13 @@ const NotasPopup = ({ notas, onNotasChange, onGuardar, onCancelar, guardando, ve
                 <div className="popup-content">
                     <h2>Notas del Vehículo</h2>
                     <p><strong>Vehículo:</strong> {vehiculo}</p>
-                    
                     <div className="form-group">
                         <label htmlFor="notas">Notas y observaciones:</label>
-                        <textarea
-                            id="notas"
-                            value={notas}
-                            onChange={(e) => onNotasChange(e.target.value)}
-                            placeholder="Escribe aquí las notas, observaciones, detalles importantes..."
-                            rows="8"
-                            style={{
-                                width: '100%',
-                                padding: '12px',
-                                border: '1px solid #cbd5e0',
-                                borderRadius: '6px',
-                                fontSize: '14px',
-                                fontFamily: 'inherit',
-                                resize: 'vertical'
-                            }}
-                        />
+                        <textarea id="notas" value={notas} onChange={(e) => onNotasChange(e.target.value)} placeholder="Escribe aquí las notas, observaciones, detalles importantes..." rows="8" style={{ width: '100%', padding: '12px', border: '1px solid #cbd5e0', borderRadius: '6px', fontSize: '14px', fontFamily: 'inherit', resize: 'vertical' }} />
                     </div>
-
                     <div className="form-actions">
-                        <button 
-                            type="button" 
-                            onClick={onGuardar}
-                            className="btn-success"
-                            disabled={guardando}
-                        >
-                            {guardando ? 'Guardando...' : 'Guardar Notas'}
-                        </button>
-                        <button 
-                            type="button" 
-                            onClick={onCancelar}
-                            className="btn-cancel"
-                            disabled={guardando}
-                        >
-                            Cancelar
-                        </button>
+                        <button type="button" onClick={onGuardar} className="btn-success" disabled={guardando}>{guardando ? 'Guardando...' : 'Guardar Notas'}</button>
+                        <button type="button" onClick={onCancelar} className="btn-cancel" disabled={guardando}>Cancelar</button>
                     </div>
                 </div>
             </div>
@@ -1159,300 +772,140 @@ const NotasPopup = ({ notas, onNotasChange, onGuardar, onCancelar, guardando, ve
     );
 };
 
-const TrabajoSection = ({ 
-    index, 
-    data, 
-    showAddButton, 
-    onAddTrabajo, 
-    onTerminarTrabajo, 
-    onAbrirNotas,
-    onAbrirEdicion,
-    renderSubtrabajos,
-    canTerminar,
-    isAdmin
-}) => {
+const TrabajoSection = ({ index, data, showAddButton, onAddTrabajo, onTerminarTrabajo, onAbrirNotas, onAbrirEdicion, renderSubtrabajos, canTerminar, isAdmin }) => {
     const sectionId = `section${index + 1}`;
-
     if (!data && showAddButton) {
         return (
             <div className="col section empty-section" id={sectionId}>
                 <div className="btn-container">
-                    <button 
-                        className="btn btn-custom"
-                        onClick={() => onAddTrabajo(index)}
-                    >
-                        Nuevo Trabajo
-                    </button>
+                    <button className="btn btn-custom" onClick={() => onAddTrabajo(index)}>Nuevo Trabajo</button>
                 </div>
             </div>
         );
     }
-
-    if (!data) {
-        return (
-            <div className="col section empty-section" id={sectionId}>
-                {/* Sección vacía sin botón */}
-            </div>
-        );
-    }
-
+    if (!data) return <div className="col section empty-section" id={sectionId} />;
     return (
-        <div 
-            className="col section" 
-            id={sectionId}
-            style={{ backgroundColor: data.color }}
-        >
+        <div className="col section" id={sectionId} style={{ backgroundColor: data.color }}>
             <div className="custom-content">
-                <div className="sectiontitle">
-                    {data.marca} {data.modelo} {data.año}
-                </div>
-                
-                <div className="subtrabajos-list">
-                    {data.trabajos.map((trabajo, trabajoIndex) => 
-                        trabajo && renderSubtrabajos(data.id, trabajo, trabajoIndex)
-                    )}
-                </div>
+                <div className="sectiontitle">{data.marca} {data.modelo} {data.año}</div>
+                <div className="subtrabajos-list">{data.trabajos.map((trabajo, trabajoIndex) => trabajo && renderSubtrabajos(data.id, trabajo, trabajoIndex))}</div>
             </div>
-
-            <div className="custom-content-fecha">
-                Fecha de ingreso: {data.fechaIngreso}
-            </div>
-
+            <div className="custom-content-fecha">Fecha de ingreso: {data.fechaIngreso}</div>
             <div className="delete-button-container">
-                <button 
-                    className="btn btn-notas"
-                    onClick={() => onAbrirNotas(data)}
-                    title="Agregar o ver notas"
-                >
-                    📝
-                </button>
-
-                {/* Botón de Editar - Solo para administradores */}
-                {isAdmin && (
-                    <button 
-                        className="btn btn-editar"
-                        onClick={() => onAbrirEdicion(data)}
-                        title="Editar información del vehículo"
-                    >
-                        ✏️
-                    </button>
-                )}
-                
-                {canTerminar && (
-                    <button 
-                        className="btn btn-customD"
-                        onClick={() => onTerminarTrabajo(data.id)}
-                    >
-                        Terminar trabajo
-                    </button>
-                )}
+                <button className="btn btn-notas" onClick={() => onAbrirNotas(data)} title="Agregar o ver notas">📝</button>
+                {isAdmin && <button className="btn btn-editar" onClick={() => onAbrirEdicion(data)} title="Editar información del vehículo">✏️</button>}
+                {canTerminar && <button className="btn btn-customD" onClick={() => onTerminarTrabajo(data.id)}>Terminar trabajo</button>}
             </div>
         </div>
     );
 };
 
 const SubtrabajoItem = ({ trabajoId, subtrabajo, isGreen, onToggle }) => {
-    const handleClick = () => {
-        const newState = !isGreen;
-        onToggle(newState);
-    };
-
+    const handleClick = () => onToggle(!isGreen);
     return (
         <div className="custom-content-trabajo2">
             <div className="subtrabajo-text">{subtrabajo}</div>
-            <button 
-                className={`color-btn-trabajo ${isGreen ? 'green' : 'red'}`}
-                onClick={handleClick}
-            />
+            <button className={`color-btn-trabajo ${isGreen ? 'green' : 'red'}`} onClick={handleClick} />
         </div>
     );
 };
 
-const TrabajoPopup = ({ 
-    formData, 
-    marcasData, 
-    añosData, 
-    modelosData,
-    loadingMarcas,
-    loadingAños,
-    loadingModelos,
-    apiStatus,
-    trabajosData,
-    trabajosActivosForm,
-    onInputChange, 
-    onAddTrabajoField, 
-    onSubtrabajoChange, 
-    onSubmit, 
-    onClose 
-}) => {
+const TrabajoPopup = ({ formData, marcasData, añosData, modelosData, loadingMarcas, loadingAños, loadingModelos, apiStatus, trabajosData, trabajosActivosForm, onInputChange, onAddTrabajoField, onSubtrabajoChange, onSubmit, onClose }) => {
+    const [showClienteFields, setShowClienteFields] = useState(formData.registrar_cliente || false);
+
+    const handleRegistrarClienteChange = (checked) => {
+        setShowClienteFields(checked);
+        onInputChange('registrar_cliente', checked);
+    };
+
     return (
         <div className="popup-overlay">
             <div className="popup">
                 <div className="popup-content">
                     <h2>Añadir Vehículo</h2>
-                    
                     <form onSubmit={onSubmit}>
                         <div className="form-group">
                             <label htmlFor="marca">Marca:</label>
-                            <input
-                                type="text"
-                                id="marca"
-                                value={formData.marca}
-                                onChange={(e) => onInputChange('marca', e.target.value)}
-                                list="marcas-lista"
-                                placeholder="Escribe o selecciona una marca"
-                                required
-                                disabled={loadingMarcas}
-                                className="custom-select"
-                            />
+                            <input type="text" id="marca" value={formData.marca} onChange={(e) => onInputChange('marca', e.target.value)} list="marcas-lista" placeholder="Escribe o selecciona una marca" required disabled={loadingMarcas} className="custom-select" />
                             <datalist id="marcas-lista">
-                                <option value="">
-                                    {loadingMarcas ? '🔄 Cargando marcas...' : 'Elige una marca...'}
-                                </option>
-                                {marcasData.map((marca, index) => (
-                                    <option key={index} value={marca}>
-                                        {marca}
-                                    </option>
-                                ))}
+                                <option value="">{loadingMarcas ? '🔄 Cargando marcas...' : 'Elige una marca...'}</option>
+                                {marcasData.map((marca, index) => <option key={index} value={marca}>{marca}</option>)}
                             </datalist>
                         </div>
-
                         <div className="form-group">
                             <label htmlFor="año">Año:</label>
-                            <input
-                                type="text"
-                                id="año"
-                                value={formData.año}
-                                onChange={(e) => {
-                                    // Filtrar solo números
-                                    const soloNumeros = e.target.value.replace(/[^0-9]/g, '');
-                                    onInputChange('año', soloNumeros);
-                                }}
-                                list="años-lista"
-                                placeholder="Selecciona o escribe un año"
-                                required
-                                disabled={!formData.marca || loadingAños}
-                                className="custom-select"
-                                maxLength="4" // Limitar a 4 dígitos para años
-                                pattern="[0-9]*"
-                                inputMode="numeric" 
-                            />
+                            <input type="text" id="año" value={formData.año} onChange={(e) => { const soloNumeros = e.target.value.replace(/[^0-9]/g, ''); onInputChange('año', soloNumeros); }} list="años-lista" placeholder="Selecciona o escribe un año" required disabled={!formData.marca || loadingAños} className="custom-select" maxLength="4" pattern="[0-9]*" inputMode="numeric" />
                             <datalist id="años-lista">
-                                <option value="">
-                                    {loadingAños ? '🔄 Cargando años...' : 
-                                    !formData.marca ? 'Primero selecciona una marca' : 'Elige un año...'}
-                                </option>
-                                {añosData.map((año, index) => (
-                                    <option key={index} value={año}>
-                                        {año}
-                                    </option>
-                                ))}
+                                <option value="">{loadingAños ? '🔄 Cargando años...' : !formData.marca ? 'Primero selecciona una marca' : 'Elige un año...'}</option>
+                                {añosData.map((año, index) => <option key={index} value={año}>{año}</option>)}
                             </datalist>
                         </div>
-
                         <div className="form-group">
                             <label htmlFor="modelo">Modelo:</label>
-                            <input
-                                type="text"
-                                id="modelo"
-                                value={formData.modelo}
-                                onChange={(e) => onInputChange('modelo', e.target.value)}
-                                list="modelos-lista"
-                                placeholder="Escribe o selecciona un modelo"
-                                required
-                                disabled={!formData.año || loadingModelos}
-                                className="custom-select"
-                            />
+                            <input type="text" id="modelo" value={formData.modelo} onChange={(e) => onInputChange('modelo', e.target.value)} list="modelos-lista" placeholder="Escribe o selecciona un modelo" required disabled={!formData.año || loadingModelos} className="custom-select" />
                             <datalist id="modelos-lista">
-                                <option value="">
-                                    {loadingModelos ? '🔄 Cargando modelos...' : 
-                                     !formData.año ? 'Primero selecciona un año' : 'Elige un modelo...'}
-                                </option>
-                                {modelosData.map((modelo, index) => (
-                                    <option key={index} value={modelo}>
-                                        {modelo}
-                                    </option>
-                                ))}
+                                <option value="">{loadingModelos ? '🔄 Cargando modelos...' : !formData.año ? 'Primero selecciona un año' : 'Elige un modelo...'}</option>
+                                {modelosData.map((modelo, index) => <option key={index} value={modelo}>{modelo}</option>)}
                             </datalist>
                         </div>
-
                         <div id="trabajosContainer">
                             {formData.trabajos.map((trabajo, index) => (
                                 <div key={index} className="trabajo-group">
                                     <div className="form-group">
-                                        <label htmlFor={`trabajo${index}`}>
-                                            Trabajo {index + 1}:
-                                        </label>
-                                        <input
-                                            type="text"
-                                            id={`trabajo${index}`}
-                                            value={trabajo}
-                                            onChange={(e) => onInputChange('trabajo', e.target.value, index)}
-                                            list="trabajolista"
-                                            placeholder="Escribe o selecciona un trabajo"
-                                            required
-                                        />
+                                        <label htmlFor={`trabajo${index}`}>Trabajo {index + 1}:</label>
+                                        <input type="text" id={`trabajo${index}`} value={trabajo} onChange={(e) => onInputChange('trabajo', e.target.value, index)} list="trabajolista" placeholder="Escribe o selecciona un trabajo" required />
                                     </div>
-                                    
                                     {trabajo === "Afinación" && (
                                         <div className="subtrabajos-checkbox-group">
                                             <label className="subtrabajos-label">Seleccionar subtrabajos de Afinación:</label>
-                                            <CheckboxGroup 
-                                                trabajos={trabajosData.trabajosAfinacion}
-                                                trabajosActivos={trabajosActivosForm.trabajosActivosAfinacion}
-                                                onToggle={(subtrabajo, checked) => 
-                                                    onSubtrabajoChange('Afinacion', subtrabajo, checked)
-                                                }
-                                            />
+                                            <CheckboxGroup trabajos={trabajosData.trabajosAfinacion} trabajosActivos={trabajosActivosForm.trabajosActivosAfinacion} onToggle={(subtrabajo, checked) => onSubtrabajoChange('Afinacion', subtrabajo, checked)} />
                                         </div>
                                     )}
-                                    
                                     {trabajo === "Suspensión" && (
                                         <div className="subtrabajos-checkbox-group">
                                             <label className="subtrabajos-label">Seleccionar subtrabajos de Suspensión:</label>
-                                            <CheckboxGroup 
-                                                trabajos={trabajosData.trabajosSuspension}
-                                                trabajosActivos={trabajosActivosForm.trabajosActivosSuspension}
-                                                onToggle={(subtrabajo, checked) => 
-                                                    onSubtrabajoChange('Suspension', subtrabajo, checked)
-                                                }
-                                            />
+                                            <CheckboxGroup trabajos={trabajosData.trabajosSuspension} trabajosActivos={trabajosActivosForm.trabajosActivosSuspension} onToggle={(subtrabajo, checked) => onSubtrabajoChange('Suspension', subtrabajo, checked)} />
                                         </div>
                                     )}
-                                    
                                     {trabajo === "Frenos" && (
                                         <div className="subtrabajos-checkbox-group">
                                             <label className="subtrabajos-label">Seleccionar subtrabajos de Frenos:</label>
-                                            <CheckboxGroup 
-                                                trabajos={trabajosData.trabajosFrenos}
-                                                trabajosActivos={trabajosActivosForm.trabajosActivosFrenos}
-                                                onToggle={(subtrabajo, checked) => 
-                                                    onSubtrabajoChange('Frenos', subtrabajo, checked)
-                                                }
-                                            />
+                                            <CheckboxGroup trabajos={trabajosData.trabajosFrenos} trabajosActivos={trabajosActivosForm.trabajosActivosFrenos} onToggle={(subtrabajo, checked) => onSubtrabajoChange('Frenos', subtrabajo, checked)} />
                                         </div>
                                     )}
                                 </div>
                             ))}
                         </div>
-
                         <datalist id="trabajolista">
                             <option value="Afinación" />
                             <option value="Frenos" />
                             <option value="Suspensión" />
                         </datalist>
-
-                        <button type="button" onClick={onAddTrabajoField} className="btn-secondary">
-                            + Añadir otro trabajo
-                        </button>
-
+                        <button type="button" onClick={onAddTrabajoField} className="btn-secondary">+ Añadir otro trabajo</button>
+                        
+                        <div className="trab-cliente-section">
+                            <div className="trab-cliente-header">
+                                <input type="checkbox" id="registrar_cliente" checked={showClienteFields} onChange={(e) => handleRegistrarClienteChange(e.target.checked)} className="trab-cliente-checkbox" />
+                                <label htmlFor="registrar_cliente" className="trab-cliente-label">Registrar cliente</label>
+                            </div>
+                            {showClienteFields && (
+                                <div className="trab-cliente-fields">
+                                    <div className="form-group">
+                                        <label htmlFor="cliente_nombre">Nombre del cliente:</label>
+                                        <input type="text" id="cliente_nombre" value={formData.cliente_nombre || ''} onChange={(e) => onInputChange('cliente_nombre', e.target.value)} placeholder="Nombre completo" className="custom-select" />
+                                    </div>
+                                    <div className="form-group">
+                                        <label htmlFor="cliente_telefono">Teléfono:</label>
+                                        <input type="tel" id="cliente_telefono" value={formData.cliente_telefono || '+52 '} onChange={(e) => onInputChange('cliente_telefono', e.target.value)} placeholder="+52 5551234567" className="custom-select" />
+                                        <small className="trab-input-hint">📱 Formato: +52 seguido de 10 dígitos</small>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                        
                         <div className="form-actions">
-                            <button type="submit" className="btn-success">
-                                Agregar Vehículo
-                            </button>
-                            <button type="button" onClick={onClose} className="btn-cancel">
-                                Cancelar
-                            </button>
+                            <button type="submit" className="btn-success">Agregar Vehículo</button>
+                            <button type="button" onClick={onClose} className="btn-cancel">Cancelar</button>
                         </div>
                     </form>
                 </div>
@@ -1466,46 +919,33 @@ const CheckboxGroup = ({ trabajos, trabajosActivos, onToggle }) => {
         <div className="ContenedorAceite">
             {trabajos.map((trabajo, index) => (
                 <div key={index} className="form-check ContenedorAceite">
-                    <label 
-                        className="form-check-label"
-                        htmlFor={`checkbox-${trabajo.replace(/\s+/g, '-').toLowerCase()}`}
-                    >
-                        {trabajo}
-                    </label>
-
-                    <input
-                        className="Checkbox"
-                        type="checkbox"
-                        id={`checkbox-${trabajo.replace(/\s+/g, '-').toLowerCase()}`}
-                        checked={trabajosActivos.includes(trabajo)}
-                        onChange={(e) => onToggle(trabajo, e.target.checked)}
-                        value={trabajo}
-                    />
+                    <label className="form-check-label" htmlFor={`checkbox-${trabajo.replace(/\s+/g, '-').toLowerCase()}`}>{trabajo}</label>
+                    <input className="Checkbox" type="checkbox" id={`checkbox-${trabajo.replace(/\s+/g, '-').toLowerCase()}`} checked={trabajosActivos.includes(trabajo)} onChange={(e) => onToggle(trabajo, e.target.checked)} value={trabajo} />
                 </div>
             ))}
         </div>
     );
 };
 
-// Componente EditarPopup
-const EditarPopup = ({ 
-    formData, 
-    trabajosData,
-    onInputChange, 
-    onTrabajoChange, 
-    onAgregarTrabajo, 
-    onEliminarTrabajo,
-    onToggleSubtrabajo,
-    onGuardar, 
-    onCancelar, 
-    guardando,
-    vehiculo 
-}) => {
+const EditarPopup = ({ formData, trabajosData, onInputChange, onTrabajoChange, onAgregarTrabajo, onEliminarTrabajo, onToggleSubtrabajo, onGuardar, onCancelar, guardando, vehiculo }) => {
     
-    const renderSubtrabajosEdicion = (trabajo, index) => {
-        if (!["Afinación", "Suspensión", "Frenos"].includes(trabajo)) {
-            return null;
+    const [showClienteFields, setShowClienteFields] = useState(formData.registrar_cliente || false);
+
+    const handleRegistrarClienteChange = (checked) => {
+        setShowClienteFields(checked);
+        onInputChange('registrar_cliente', checked);
+    };
+
+    const handleTelefonoChange = (value) => {
+        let valor = value;
+        if (valor.trim() === '') {
+            valor = '+52 ';
         }
+        onInputChange('cliente_telefono', valor);
+    };
+
+    const renderSubtrabajosEdicion = (trabajo, index) => {
+        if (!["Afinación", "Suspensión", "Frenos"].includes(trabajo)) return null;
 
         let todosLosSubtrabajos = [];
         let subtrabajosSeleccionados = formData.subtrabajos_seleccionados[trabajo] || [];
@@ -1526,28 +966,12 @@ const EditarPopup = ({
 
         return (
             <div key={`subtrabajos-${index}`} className="subtrabajos-checkbox-group">
-                <label className="subtrabajos-label">
-                    Seleccionar subtrabajos de {trabajo}:
-                </label>
-                
+                <label className="subtrabajos-label">Seleccionar subtrabajos de {trabajo}:</label>
                 <div className="ContenedorAceite">
                     {todosLosSubtrabajos.map((subtrabajo, subIndex) => (
                         <div key={subIndex} className="form-check ContenedorAceite">
-                            <label 
-                                className="form-check-label"
-                                htmlFor={`checkbox-edicion-${trabajo}-${subtrabajo.replace(/\s+/g, '-').toLowerCase()}`}
-                            >
-                                {subtrabajo}
-                            </label>
-
-                            <input
-                                className="Checkbox"
-                                type="checkbox"
-                                id={`checkbox-edicion-${trabajo}-${subtrabajo.replace(/\s+/g, '-').toLowerCase()}`}
-                                checked={subtrabajosSeleccionados.includes(subtrabajo)}
-                                onChange={(e) => onToggleSubtrabajo(trabajo, subtrabajo, e.target.checked)}
-                                value={subtrabajo}
-                            />
+                            <label className="form-check-label" htmlFor={`checkbox-edicion-${trabajo}-${subtrabajo.replace(/\s+/g, '-').toLowerCase()}`}>{subtrabajo}</label>
+                            <input className="Checkbox" type="checkbox" id={`checkbox-edicion-${trabajo}-${subtrabajo.replace(/\s+/g, '-').toLowerCase()}`} checked={subtrabajosSeleccionados.includes(subtrabajo)} onChange={(e) => onToggleSubtrabajo(trabajo, subtrabajo, e.target.checked)} value={subtrabajo} />
                         </div>
                     ))}
                 </div>
@@ -1566,46 +990,15 @@ const EditarPopup = ({
                         <div className="form-row">
                             <div className="form-group">
                                 <label htmlFor="editar-marca">Marca:</label>
-                                <input
-                                    type="text"
-                                    id="editar-marca"
-                                    value={formData.marca}
-                                    onChange={(e) => onInputChange('marca', e.target.value)}
-                                    required
-                                    className="custom-select"
-                                />
+                                <input type="text" id="editar-marca" value={formData.marca} onChange={(e) => onInputChange('marca', e.target.value)} required className="custom-select" />
                             </div>
-
                             <div className="form-group">
                                 <label htmlFor="editar-modelo">Modelo:</label>
-                                <input
-                                    type="text"
-                                    id="editar-modelo"
-                                    value={formData.modelo}
-                                    onChange={(e) => onInputChange('modelo', e.target.value)}
-                                    required
-                                    className="custom-select"
-                                />
+                                <input type="text" id="editar-modelo" value={formData.modelo} onChange={(e) => onInputChange('modelo', e.target.value)} required className="custom-select" />
                             </div>
-
                             <div className="form-group">
                                 <label htmlFor="editar-año">Año:</label>
-                                <input
-                                    type="text"
-                                    id="editar-año"
-                                    value={formData.año}
-                                    onChange={(e) => {
-                                        // Filtrar solo números
-                                        const soloNumeros = e.target.value.replace(/[^0-9]/g, '');
-                                        onInputChange('año', soloNumeros);
-                                    }}
-                                    required
-                                    className="custom-select"
-                                    maxLength="4"
-                                    pattern="[0-9]*"
-                                    inputMode="numeric"
-                                    placeholder="Año"
-                                />
+                                <input type="text" id="editar-año" value={formData.año} onChange={(e) => { const soloNumeros = e.target.value.replace(/[^0-9]/g, ''); onInputChange('año', soloNumeros); }} required className="custom-select" maxLength="4" pattern="[0-9]*" inputMode="numeric" placeholder="Año" />
                             </div>
                         </div>
 
@@ -1614,26 +1007,9 @@ const EditarPopup = ({
                             {formData.trabajos.map((trabajo, index) => (
                                 <div key={index} className="trabajo-edicion-group">
                                     <div className="trabajo-edicion-item">
-                                        <input
-                                            type="text"
-                                            value={trabajo}
-                                            onChange={(e) => onTrabajoChange(index, e.target.value)}
-                                            list="trabajolista-edicion"
-                                            placeholder={`Trabajo ${index + 1}`}
-                                            className="trabajo-input"
-                                        />
-                                        <button
-                                            type="button"
-                                            onClick={() => onEliminarTrabajo(index)}
-                                            className="btn-eliminar-trabajo"
-                                            disabled={formData.trabajos.length <= 1}
-                                            title="Eliminar este trabajo"
-                                        >
-                                            🗑️
-                                        </button>
+                                        <input type="text" value={trabajo} onChange={(e) => onTrabajoChange(index, e.target.value)} list="trabajolista-edicion" placeholder={`Trabajo ${index + 1}`} className="trabajo-input" />
+                                        <button type="button" onClick={() => onEliminarTrabajo(index)} className="btn-eliminar-trabajo" disabled={formData.trabajos.length <= 1} title="Eliminar este trabajo">🗑️</button>
                                     </div>
-                                    
-                                    {/* Renderizar subtrabajos para este trabajo */}
                                     {renderSubtrabajosEdicion(trabajo, index)}
                                 </div>
                             ))}
@@ -1645,30 +1021,32 @@ const EditarPopup = ({
                             <option value="Suspensión" />
                         </datalist>
 
-                        <button 
-                            type="button" 
-                            onClick={onAgregarTrabajo} 
-                            className="btn-secondary"
-                        >
-                            + Añadir otro trabajo
-                        </button>
+                        <button type="button" onClick={onAgregarTrabajo} className="btn-secondary">+ Añadir otro trabajo</button>
+
+                        {/* SECCIÓN DE CLIENTE PARA EDICIÓN */}
+                        <div className="trab-cliente-section">
+                            <div className="trab-cliente-header">
+                                <input type="checkbox" id="editar-registrar_cliente" checked={showClienteFields} onChange={(e) => handleRegistrarClienteChange(e.target.checked)} className="trab-cliente-checkbox" />
+                                <label htmlFor="editar-registrar_cliente" className="trab-cliente-label">📝 Registrar cliente al terminar el trabajo</label>
+                            </div>
+                            {showClienteFields && (
+                                <div className="trab-cliente-fields">
+                                    <div className="form-group">
+                                        <label htmlFor="editar-cliente_nombre">Nombre del cliente:</label>
+                                        <input type="text" id="editar-cliente_nombre" value={formData.cliente_nombre || ''} onChange={(e) => onInputChange('cliente_nombre', e.target.value)} placeholder="Nombre completo" className="custom-select" />
+                                    </div>
+                                    <div className="form-group">
+                                        <label htmlFor="editar-cliente_telefono">Teléfono:</label>
+                                        <input type="tel" id="editar-cliente_telefono" value={formData.cliente_telefono || '+52 '} onChange={(e) => handleTelefonoChange(e.target.value)} placeholder="+52 5551234567" className="custom-select" />
+                                        <small className="trab-input-hint">📱 Formato: +52 seguido de 10 dígitos</small>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
 
                         <div className="form-actions">
-                            <button 
-                                type="submit" 
-                                className="btn-success"
-                                disabled={guardando}
-                            >
-                                {guardando ? 'Guardando...' : 'Guardar Cambios'}
-                            </button>
-                            <button 
-                                type="button" 
-                                onClick={onCancelar}
-                                className="btn-cancel"
-                                disabled={guardando}
-                            >
-                                Cancelar
-                            </button>
+                            <button type="submit" className="btn-success" disabled={guardando}>{guardando ? 'Guardando...' : 'Guardar Cambios'}</button>
+                            <button type="button" onClick={onCancelar} className="btn-cancel" disabled={guardando}>Cancelar</button>
                         </div>
                     </form>
                 </div>

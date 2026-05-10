@@ -21,7 +21,9 @@ class Trabajo extends Model
         'fecha_ingreso',
         'color',
         'completado',
-        'notas'
+        'notas',
+        'cliente_nombre',      // ← NUEVO CAMPO
+        'cliente_telefono'     // ← NUEVO CAMPO
     ];
 
     protected $casts = [
@@ -39,7 +41,6 @@ class Trabajo extends Model
         'color' => '#261472',
         'completado' => false
     ];
-
 
     /**
      * Obtener trabajos activos 

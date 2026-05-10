@@ -7,16 +7,17 @@
     "license": "MIT",
     "require": {
         "php": "^8.2",
-        "laravel/framework": "^12.0",
-        "laravel/sanctum": "^4.2",
-        "laravel/tinker": "^2.10.1",
-        "ext-pdo": "*",
-        "ext-mysqli": "*",
         "ext-curl": "*",
         "ext-json": "*",
         "ext-mbstring": "*",
+        "ext-mysqli": "*",
+        "ext-pdo": "*",
         "ext-xml": "*",
-        "ext-zip": "*"
+        "ext-zip": "*",
+        "barryvdh/laravel-dompdf": "*",
+        "laravel/framework": "^12.0",
+        "laravel/sanctum": "^4.2",
+        "laravel/tinker": "^2.10.1"
     },
     "require-dev": {
         "fakerphp/faker": "^1.23",

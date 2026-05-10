@@ -1,23 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import AdminPanel from './AdminPanel';
+import DashboardPanel from './DashboardPanel';
 import Sidebar from './Sidebar';
 import TrabajosPanel from './TrabajosPanel';
 import HistorialPanel from './HistorialPanel';
+import ClientesPanel from './ClientesPanel';
 
 const Dashboard = ({ user, onLogout, sidebarOpen, onSidebarHover, onSidebarToggle }) => {
     const [currentTime, setCurrentTime] = useState(new Date());
-    const [activeSection, setActiveSection] = useState('trabajos'); // Cambiado para que todos vean 'trabajos' por defecto
+    const [activeSection, setActiveSection] = useState('trabajos');
 
-    //Actualizar la hora cada segundo
+    // Actualizar la hora cada segundo
     useEffect(() => {
         const timer = setInterval(() => {
             setCurrentTime(new Date());
         }, 1000);
-
         return () => clearInterval(timer);
     }, []);
 
-    // Función para formatear la fecha
     const formatDate = (date) => {
         const options = { 
             year: 'numeric', 
@@ -27,7 +27,6 @@ const Dashboard = ({ user, onLogout, sidebarOpen, onSidebarHover, onSidebarToggl
         return date.toLocaleDateString('es-ES', options);
     };
 
-    // Función para formatear la hora
     const formatTime = (date) => {
         return date.toLocaleTimeString('es-ES', { 
             hour: '2-digit', 
@@ -37,34 +36,35 @@ const Dashboard = ({ user, onLogout, sidebarOpen, onSidebarHover, onSidebarToggl
         });
     };
 
-    // Función para obtener el día de la semana
     const getWeekDay = (date) => {
         return date.toLocaleDateString('es-ES', { weekday: 'long' });
     };
 
-    //Renderizar el panel según la sección activa y el rol del usuario
+    // Renderizar el panel según la sección activa y el rol del usuario
     const renderPanel = () => {
         if (user.role === 'tecnico' || user.role === 'monitor') {
-            // Técnicos y Monitores pueden ver Trabajos e Historial
             switch (activeSection) {
                 case 'trabajos':
-                    return <TrabajosPanel user={user} />; // Pasar user
+                    return <TrabajosPanel user={user} />;
                 case 'historial':
-                    return <HistorialPanel user={user} />; // Pasar user
+                    return <HistorialPanel user={user} />;
                 default:
-                    return <TrabajosPanel user={user} />; // Pasar user
+                    return <TrabajosPanel user={user} />;
             }
         } else {
-            // Administradores pueden ver todos los paneles
             switch (activeSection) {
+                case 'analysis':
+                    return <DashboardPanel />;
                 case 'dashboard':
                     return <AdminPanel />;
                 case 'trabajos':
-                    return <TrabajosPanel user={user} />; // Pasar user
+                    return <TrabajosPanel user={user} />;
                 case 'historial':
-                    return <HistorialPanel user={user} />; // Pasar user
+                    return <HistorialPanel user={user} />;
+                case 'clientes':
+                    return <ClientesPanel user={user} />;
                 default:
-                    return <TrabajosPanel user={user} />; // Pasar user
+                    return <TrabajosPanel user={user} />;
             }
         }
     };
@@ -81,7 +81,6 @@ const Dashboard = ({ user, onLogout, sidebarOpen, onSidebarHover, onSidebarToggl
                 onSectionChange={setActiveSection}
             />
 
-            {/* Overlay para móviles */}
             {sidebarOpen && window.innerWidth < 1024 && (
                 <div 
                     className="sidebar-overlay"
@@ -89,14 +88,12 @@ const Dashboard = ({ user, onLogout, sidebarOpen, onSidebarHover, onSidebarToggl
                 ></div>
             )}
             
-            {/* Contenido principal */}
             <div 
                 className="main-content"
                 onMouseEnter={() => onSidebarHover(false)}
             >
                 <header className="dashboard-header">
                     <div className="header-content">
-                        {/* Botón para abrir sidebar SOLO en celulares */}
                         {window.innerWidth < 1024 && (
                             <button 
                                 className="sidebar-toggle-mobile"
@@ -107,7 +104,6 @@ const Dashboard = ({ user, onLogout, sidebarOpen, onSidebarHover, onSidebarToggl
                             </button>
                         )}
 
-                        {/* Fecha a la IZQUIERDA */}
                         <div className="header-date">
                             <div className="current-date">
                                 {formatDate(currentTime)}
@@ -118,7 +114,6 @@ const Dashboard = ({ user, onLogout, sidebarOpen, onSidebarHover, onSidebarToggl
                             </div>
                         </div>
 
-                        {/* Logo en el CENTRO */}
                         <div className="header-logo-container">
                             <img 
                                 src="/images/logo.svg" 
@@ -127,7 +122,6 @@ const Dashboard = ({ user, onLogout, sidebarOpen, onSidebarHover, onSidebarToggl
                             />
                         </div>
                         
-                        {/* Hora a la DERECHA */}
                         <div className="header-time">
                             <div className="current-time">
                                 {formatTime(currentTime)}

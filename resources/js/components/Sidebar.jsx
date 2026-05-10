@@ -1,10 +1,20 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 
 const Sidebar = ({ isOpen, onHover, onToggle, onLogout, user, activeSection, onSectionChange }) => {
+    const [screenResolution, setScreenResolution] = useState(`${window.innerWidth}x${window.innerHeight}`);
+
+    useEffect(() => {
+        const handleResize = () => {
+            setScreenResolution(`${window.innerWidth}x${window.innerHeight}`);
+        };
+
+        window.addEventListener('resize', handleResize);
+        return () => window.removeEventListener('resize', handleResize);
+    }, []);
+
     // Menú items basados en el rol del usuario
     const getMenuItems = () => {
-        if (user.role === 'tecnico') {
-            // Técnicos ven "Trabajos" e "Historial"
+        if (user.role === 'tecnico' || user.role === 'monitor') {
             return [
                 { id: 'trabajos', label: 'Trabajos', icon: '🔧' },
                 { id: 'historial', label: 'Historial de Trabajos', icon: '📋' }
@@ -13,6 +23,8 @@ const Sidebar = ({ isOpen, onHover, onToggle, onLogout, user, activeSection, onS
             // Administradores ven todo el menú
             return [
                 { id: 'trabajos', label: 'Trabajos', icon: '🔧' },
+                { id: 'clientes', label: 'Clientes', icon: '💬' },
+                { id: 'analysis', label: 'Análisis', icon: '📊' },
                 { id: 'dashboard', label: 'Gestión de Usuarios', icon: '👥' },
                 { id: 'historial', label: 'Historial de Trabajos', icon: '📋' }         
             ];
@@ -23,7 +35,6 @@ const Sidebar = ({ isOpen, onHover, onToggle, onLogout, user, activeSection, onS
 
     const handleMenuItemClick = (itemId) => {
         onSectionChange(itemId);
-        // Cerrar sidebar en móviles al seleccionar item
         if (window.innerWidth < 1024) {
             onToggle();
         }
@@ -39,7 +50,6 @@ const Sidebar = ({ isOpen, onHover, onToggle, onLogout, user, activeSection, onS
 
     const handleLogoutClick = () => {
         onLogout();
-        // Cerrar sidebar en móviles
         if (window.innerWidth < 1024) {
             onToggle();
         }
@@ -60,7 +70,6 @@ const Sidebar = ({ isOpen, onHover, onToggle, onLogout, user, activeSection, onS
                         <span className="sidebar-user-name">{user.name}</span>
                     </div>
                 </div>
-                {/* Botón de cerrar SOLO en móviles/tablets */}
                 {window.innerWidth < 1024 && (
                     <button 
                         className="sidebar-close"
@@ -89,13 +98,15 @@ const Sidebar = ({ isOpen, onHover, onToggle, onLogout, user, activeSection, onS
             </nav>
 
             <div className="sidebar-footer">
-                {/* Botón de Logout en el footer del sidebar */}
                 <button 
                     className="sidebar-logout-btn"
                     onClick={handleLogoutClick}
                 >
                     <span className="sidebar-logout-label">Cerrar Sesión</span>
                 </button>
+                <div className="sidebar-resolution">
+                    <span>Resolución: {screenResolution}</span>
+                </div>
             </div>
         </aside>
     );
