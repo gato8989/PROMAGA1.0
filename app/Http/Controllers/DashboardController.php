@@ -21,16 +21,7 @@ class DashboardController extends Controller
                 ? Carbon::parse($request->query('fecha_fin'))->endOfDay()
                 : now()->endOfDay();
                 
-            \Illuminate\Support\Facades\Log::info('Dashboard Stats - Fechas:', [
-                'inicio' => $fechaInicio->toDateTimeString(),
-                'fin' => $fechaFin->toDateTimeString()
-            ]);
-            
             $trabajos = HistorialTrabajo::whereBetween('created_at', [$fechaInicio, $fechaFin])->get();
-            
-            \Illuminate\Support\Facades\Log::info('Dashboard Stats - Trabajos encontrados:', [
-                'count' => $trabajos->count()
-            ]);
             
             $totalVehiculos = $trabajos->count();
             $tiempoPromedio = 0;
@@ -39,11 +30,15 @@ class DashboardController extends Controller
             if ($totalVehiculos > 0) {
                 $tiempos = [];
                 foreach ($trabajos as $trabajo) {
-                    $entrada = $trabajo->created_at;
-                    $salida = $trabajo->updated_at;
+                    // Obtener fechas correctamente
+                    $entrada = $this->parseFecha($trabajo->fecha_ingreso, $trabajo->hora_creacion);
+                    $salida = $this->parseFecha($trabajo->fecha_terminado, $trabajo->hora_terminado);
                     
-                    if ($entrada && $salida && $entrada < $salida) {
-                        $tiempos[] = $entrada->diffInMinutes($salida);
+                    if ($entrada && $salida) {
+                        $minutos = $entrada->diffInMinutes($salida);
+                        if ($minutos > 0) {
+                            $tiempos[] = $minutos;
+                        }
                     }
                     
                     if (is_array($trabajo->trabajos)) {
@@ -77,7 +72,7 @@ class DashboardController extends Controller
     }
 
     /**
-     * Obtener tendencia diaria
+     * Obtener tendencia diaria - CORREGIDO
      */
     public function trend(Request $request)
     {
@@ -89,16 +84,7 @@ class DashboardController extends Controller
                 ? Carbon::parse($request->query('fecha_fin'))->endOfDay() 
                 : now()->endOfDay();
                 
-            \Illuminate\Support\Facades\Log::info('Dashboard Trend - Fechas:', [
-                'inicio' => $fechaInicio->toDateTimeString(),
-                'fin' => $fechaFin->toDateTimeString()
-            ]);
-            
             $trabajos = HistorialTrabajo::whereBetween('created_at', [$fechaInicio, $fechaFin])->get();
-            
-            \Illuminate\Support\Facades\Log::info('Dashboard Trend - Trabajos encontrados:', [
-                'count' => $trabajos->count()
-            ]);
             
             $tendencia = [];
             $currentDate = $fechaInicio->copy();
@@ -107,15 +93,21 @@ class DashboardController extends Controller
                 $fechaStr = $currentDate->format('Y-m-d');
                 
                 $trabajosDelDia = $trabajos->filter(function($trabajo) use ($currentDate) {
-                    return $trabajo->created_at->format('Y-m-d') === $currentDate->format('Y-m-d');
+                    $fechaTrabajo = $this->parseFecha($trabajo->fecha_terminado, null);
+                    return $fechaTrabajo && $fechaTrabajo->format('Y-m-d') === $currentDate->format('Y-m-d');
                 });
                 
                 $vehiculosCount = $trabajosDelDia->count();
                 $horas = 0;
                 
                 foreach ($trabajosDelDia as $trabajo) {
-                    $minutos = $trabajo->created_at->diffInMinutes($trabajo->updated_at);
-                    $horas += $minutos / 60;
+                    $entrada = $this->parseFecha($trabajo->fecha_ingreso, $trabajo->hora_creacion);
+                    $salida = $this->parseFecha($trabajo->fecha_terminado, $trabajo->hora_terminado);
+                    
+                    if ($entrada && $salida) {
+                        $minutos = $entrada->diffInMinutes($salida);
+                        $horas += $minutos / 60;
+                    }
                 }
                 
                 $tendencia[] = [
@@ -314,7 +306,6 @@ class DashboardController extends Controller
                     foreach ($trabajo->trabajos as $work) {
                         $workClean = trim($work);
                         if (!empty($workClean)) {
-                            // Limpiar el nombre del trabajo (mantener letras, números y espacios)
                             $workClean = preg_replace('/[^a-zA-Z0-9áéíóúñÑüÜ\s\-]/u', '', $workClean);
                             $workClean = trim($workClean);
                             if (!empty($workClean)) {
@@ -356,7 +347,7 @@ class DashboardController extends Controller
     }
 
     /**
-     * Obtener tiempos de trabajo - CORREGIDO (en horas y siempre muestra trabajos)
+     * Obtener tiempos de trabajo - CORREGIDO (calcula horas correctamente)
      */
     public function workTimes(Request $request)
     {
@@ -368,16 +359,7 @@ class DashboardController extends Controller
                 ? Carbon::parse($request->query('fecha_fin'))->endOfDay() 
                 : now()->endOfDay();
                 
-            \Illuminate\Support\Facades\Log::info('WorkTimes - Fechas:', [
-                'inicio' => $fechaInicio->toDateTimeString(),
-                'fin' => $fechaFin->toDateTimeString()
-            ]);
-            
             $trabajos = HistorialTrabajo::whereBetween('created_at', [$fechaInicio, $fechaFin])->get();
-            
-            \Illuminate\Support\Facades\Log::info('WorkTimes - Trabajos encontrados:', [
-                'count' => $trabajos->count()
-            ]);
             
             if ($trabajos->isEmpty()) {
                 return response()->json([
@@ -392,34 +374,23 @@ class DashboardController extends Controller
             foreach ($trabajos as $trabajo) {
                 $trabajosRealizados = $trabajo->trabajos;
                 
-                // Calcular horas (convertir minutos a horas)
-                $minutos = $trabajo->created_at->diffInMinutes($trabajo->updated_at);
+                // Calcular horas usando el método parseFecha
+                $entrada = $this->parseFecha($trabajo->fecha_ingreso, $trabajo->hora_creacion);
+                $salida = $this->parseFecha($trabajo->fecha_terminado, $trabajo->hora_terminado);
+                
+                if (!$entrada || !$salida) {
+                    continue;
+                }
+                
+                $minutos = $entrada->diffInMinutes($salida);
                 $horas = $minutos / 60;
-                
-                // Redondear a 2 decimales
                 $horas = round($horas, 2);
-                
-                \Illuminate\Support\Facades\Log::info('Procesando trabajo para workTimes:', [
-                    'id' => $trabajo->id,
-                    'marca' => $trabajo->marca,
-                    'trabajos' => $trabajosRealizados,
-                    'minutos' => $minutos,
-                    'horas' => $horas,
-                    'created_at' => $trabajo->created_at->toDateTimeString(),
-                    'updated_at' => $trabajo->updated_at->toDateTimeString()
-                ]);
                 
                 if (is_array($trabajosRealizados) && !empty($trabajosRealizados)) {
                     foreach ($trabajosRealizados as $work) {
-                        // Limpiar el trabajo pero mantener letras, números y espacios
                         $workClean = trim($work);
+                        if (empty($workClean)) continue;
                         
-                        // Si está vacío, ignorar
-                        if (empty($workClean)) {
-                            continue;
-                        }
-                        
-                        // Limpiar caracteres especiales pero mantener letras, números y espacios
                         $workClean = preg_replace('/[^a-zA-Z0-9áéíóúñÑüÜ\s\-]/u', '', $workClean);
                         $workClean = trim($workClean);
                         
@@ -427,22 +398,13 @@ class DashboardController extends Controller
                             if (!isset($tiemposPorTrabajo[$workClean])) {
                                 $tiemposPorTrabajo[$workClean] = [];
                             }
-                            
-                            // Solo agregar si hay tiempo (puede ser 0 o más)
-                            // Incluir incluso tiempos de 0 horas para mostrar trabajos rápidos
                             $tiemposPorTrabajo[$workClean][] = $horas;
                         }
                     }
                 }
             }
             
-            \Illuminate\Support\Facades\Log::info('WorkTimes - Tiempos por trabajo (horas):', [
-                'trabajos_procesados' => count($tiemposPorTrabajo),
-                'detalle' => $tiemposPorTrabajo
-            ]);
-            
             if (empty($tiemposPorTrabajo)) {
-                // Si no hay trabajos procesados, devolver algunos datos de ejemplo o vacío
                 return response()->json([
                     'success' => true, 
                     'data' => [],
@@ -455,23 +417,15 @@ class DashboardController extends Controller
                 if (!empty($tiempos)) {
                     $data[] = [
                         'trabajo' => $trabajo, 
-                        'minimo' => round(min($tiempos), 2),      // En horas
-                        'promedio' => round(array_sum($tiempos) / count($tiempos), 2), // En horas
-                        'maximo' => round(max($tiempos), 2)      // En horas
+                        'minimo' => round(min($tiempos), 2),
+                        'promedio' => round(array_sum($tiempos) / count($tiempos), 2),
+                        'maximo' => round(max($tiempos), 2)
                     ];
                 }
             }
             
-            // Ordenar por promedio de mayor a menor
             usort($data, fn($a, $b) => $b['promedio'] <=> $a['promedio']);
-            
-            // Siempre mostrar hasta 10 trabajos (si hay menos, mostrar los que existan)
             $result = array_slice($data, 0, 10);
-            
-            \Illuminate\Support\Facades\Log::info('WorkTimes - Resultado final (horas):', [
-                'count' => count($result),
-                'data' => $result
-            ]);
             
             return response()->json(['success' => true, 'data' => $result]);
             
@@ -488,180 +442,8 @@ class DashboardController extends Controller
         }
     }
 
-
     /**
-     * Obtener rendimiento de técnicos
-     */
-    public function technicianPerformance(Request $request)
-    {
-        try {
-            $fechaInicio = $request->query('fecha_inicio') 
-                ? Carbon::parse($request->query('fecha_inicio'))->startOfDay() 
-                : now()->subDays(30)->startOfDay();
-            $fechaFin = $request->query('fecha_fin') 
-                ? Carbon::parse($request->query('fecha_fin'))->endOfDay() 
-                : now()->endOfDay();
-                
-            \Illuminate\Support\Facades\Log::info('TechnicianPerformance - Fechas:', [
-                'inicio' => $fechaInicio->toDateTimeString(),
-                'fin' => $fechaFin->toDateTimeString()
-            ]);
-            
-            // Obtener todos los trabajos en el rango de fechas
-            $trabajos = HistorialTrabajo::whereBetween('created_at', [$fechaInicio, $fechaFin])->get();
-            
-            if ($trabajos->isEmpty()) {
-                return response()->json([
-                    'success' => true, 
-                    'data' => [],
-                    'message' => 'No hay datos de técnicos disponibles'
-                ]);
-            }
-            
-            // Array para almacenar datos por técnico
-            $tecnicosData = [];
-            
-            foreach ($trabajos as $trabajo) {
-                // Obtener el técnico que terminó el trabajo
-                $tecnicoRaw = $trabajo->usuario_termino ?: 'Sin asignar';
-                
-                // Extraer todos los técnicos del string
-                $tecnicos = $this->extractTechnicians($tecnicoRaw);
-                
-                // Calcular horas trabajadas para este trabajo
-                $minutos = $trabajo->created_at->diffInMinutes($trabajo->updated_at);
-                $horas = $minutos / 60;
-                
-                // Para cada técnico encontrado, sumar el trabajo y las horas
-                foreach ($tecnicos as $tecnico) {
-                    if (!isset($tecnicosData[$tecnico])) {
-                        $tecnicosData[$tecnico] = [
-                            'tecnico' => $tecnico,
-                            'horas_trabajadas' => 0,
-                            'vehiculos_trabajados' => 0,
-                            'tiempos' => []
-                        ];
-                    }
-                    
-                    $tecnicosData[$tecnico]['horas_trabajadas'] += $horas;
-                    $tecnicosData[$tecnico]['vehiculos_trabajados']++;
-                    
-                    if ($horas > 0) {
-                        $tecnicosData[$tecnico]['tiempos'][] = $horas;
-                    }
-                }
-            }
-            
-            // Calcular tiempo promedio y rendimiento para cada técnico
-            $result = [];
-            
-            // Primero, obtener el máximo de trabajos para calcular el rendimiento relativo
-            $maxTrabajos = 0;
-            foreach ($tecnicosData as $tecnico) {
-                $maxTrabajos = max($maxTrabajos, $tecnico['vehiculos_trabajados']);
-            }
-            
-            foreach ($tecnicosData as $tecnico) {
-                $promedio = 0;
-                if (count($tecnico['tiempos']) > 0) {
-                    $promedio = round(array_sum($tecnico['tiempos']) / count($tecnico['tiempos']), 2);
-                }
-                
-                // Calcular rendimiento basado en número de trabajos y tiempo promedio
-                $porcentajeTrabajos = $maxTrabajos > 0 ? ($tecnico['vehiculos_trabajados'] / $maxTrabajos) * 100 : 0;
-                
-                // Determinar nivel de rendimiento
-                if ($porcentajeTrabajos >= 70 && $promedio <= 5) {
-                    $rendimiento = 'Alto';
-                    $rendimientoClass = 'rendimiento-alta';
-                    $rendimientoIcon = '🚀';
-                } elseif ($porcentajeTrabajos >= 40 && $promedio <= 10) {
-                    $rendimiento = 'Medio';
-                    $rendimientoClass = 'rendimiento-media';
-                    $rendimientoIcon = '📈';
-                } else {
-                    $rendimiento = 'Bajo';
-                    $rendimientoClass = 'rendimiento-baja';
-                    $rendimientoIcon = '📉';
-                }
-                
-                $result[] = [
-                    'tecnico' => $tecnico['tecnico'],
-                    'trabajos' => $tecnico['vehiculos_trabajados'],
-                    'tiempo_promedio' => $promedio,
-                    'horas_trabajadas' => round($tecnico['horas_trabajadas'], 2),
-                    'rendimiento' => $rendimiento,
-                    'rendimiento_class' => $rendimientoClass,
-                    'rendimiento_icon' => $rendimientoIcon,
-                    'porcentaje' => round($porcentajeTrabajos, 1)
-                ];
-            }
-            
-            // Ordenar por horas trabajadas (de mayor a menor)
-            usort($result, fn($a, $b) => $b['horas_trabajadas'] <=> $a['horas_trabajadas']);
-            
-            \Illuminate\Support\Facades\Log::info('TechnicianPerformance - Resultado:', [
-                'count' => count($result),
-                'data' => $result
-            ]);
-            
-            return response()->json(['success' => true, 'data' => $result]);
-            
-        } catch (\Exception $e) {
-            \Illuminate\Support\Facades\Log::error('Error en technicianPerformance:', [
-                'message' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
-            ]);
-            return response()->json([
-                'success' => false, 
-                'error' => 'Error al cargar rendimiento de técnicos: ' . $e->getMessage(),
-                'data' => []
-            ], 500);
-        }
-    }
-
-    /**
-     * Extraer todos los técnicos de un string
-     * Ejemplo: "Técnico Ejemplo (Colaboraron: Administrador, Técnico Ejemplo)" 
-     * Devuelve: ["Técnico Ejemplo", "Administrador"]
-     */
-    private function extractTechnicians($tecnicoString)
-    {
-        $tecnicos = [];
-        
-        // Buscar el patrón " (Colaboraron: X, Y, Z)"
-        if (preg_match('/\(Colaboraron:\s*([^)]+)\)/i', $tecnicoString, $matches)) {
-            // Extraer el técnico principal (antes del paréntesis)
-            $tecnicoPrincipal = trim(preg_replace('/\s*\(Colaboraron:.*\)/i', '', $tecnicoString));
-            if (!empty($tecnicoPrincipal)) {
-                $tecnicos[] = $tecnicoPrincipal;
-            }
-            
-            // Extraer los colaboradores
-            $colaboradores = explode(',', $matches[1]);
-            foreach ($colaboradores as $colaborador) {
-                $colaborador = trim($colaborador);
-                if (!empty($colaborador) && !in_array($colaborador, $tecnicos)) {
-                    $tecnicos[] = $colaborador;
-                }
-            }
-        } else {
-            // Si no hay patrón de colaboradores, es un solo técnico
-            $tecnicos[] = trim($tecnicoString);
-        }
-        
-        // Limpiar nombres (eliminar "Técnico " si está al inicio)
-        $tecnicos = array_map(function($t) {
-            // Eliminar "Técnico " al inicio si existe
-            $t = preg_replace('/^Técnico\s+/i', '', $t);
-            return $t;
-        }, $tecnicos);
-        
-        return $tecnicos;
-    }
-        
-    /**
-     * Obtener horas por marca
+     * Obtener horas por marca - CORREGIDO (acumula horas correctamente)
      */
     public function hoursByBrand(Request $request)
     {
@@ -684,13 +466,25 @@ class DashboardController extends Controller
             }
             
             $horasPorMarca = [];
+            
             foreach ($trabajos as $trabajo) {
                 $marca = $trabajo->marca ?: 'Sin especificar';
+                
+                // Calcular horas usando el método parseFecha
+                $entrada = $this->parseFecha($trabajo->fecha_ingreso, $trabajo->hora_creacion);
+                $salida = $this->parseFecha($trabajo->fecha_terminado, $trabajo->hora_terminado);
+                
+                if (!$entrada || !$salida) {
+                    continue;
+                }
+                
+                $minutos = $entrada->diffInMinutes($salida);
+                $horas = $minutos / 60;
+                
                 if (!isset($horasPorMarca[$marca])) {
                     $horasPorMarca[$marca] = 0;
                 }
-                $minutos = $trabajo->created_at->diffInMinutes($trabajo->updated_at);
-                $horas = $minutos / 60;
+                
                 $horasPorMarca[$marca] += $horas;
             }
             
@@ -723,6 +517,210 @@ class DashboardController extends Controller
         }
     }
 
+    /**
+     * Obtener rendimiento de técnicos - CORREGIDO
+     */
+    public function technicianPerformance(Request $request)
+    {
+        try {
+            $fechaInicio = $request->query('fecha_inicio') 
+                ? Carbon::parse($request->query('fecha_inicio'))->startOfDay() 
+                : now()->subDays(30)->startOfDay();
+            $fechaFin = $request->query('fecha_fin') 
+                ? Carbon::parse($request->query('fecha_fin'))->endOfDay() 
+                : now()->endOfDay();
+                
+            $trabajos = HistorialTrabajo::whereBetween('created_at', [$fechaInicio, $fechaFin])->get();
+            
+            if ($trabajos->isEmpty()) {
+                return response()->json([
+                    'success' => true, 
+                    'data' => [],
+                    'message' => 'No hay datos de técnicos disponibles'
+                ]);
+            }
+            
+            $tecnicosData = [];
+            
+            foreach ($trabajos as $trabajo) {
+                $tecnicoRaw = $trabajo->usuario_termino ?: 'Sin asignar';
+                $tecnicos = $this->extractTechnicians($tecnicoRaw);
+                
+                $entrada = $this->parseFecha($trabajo->fecha_ingreso, $trabajo->hora_creacion);
+                $salida = $this->parseFecha($trabajo->fecha_terminado, $trabajo->hora_terminado);
+                
+                if (!$entrada || !$salida) {
+                    continue;
+                }
+                
+                $minutos = $entrada->diffInMinutes($salida);
+                $horas = $minutos / 60;
+                
+                foreach ($tecnicos as $tecnico) {
+                    if (!isset($tecnicosData[$tecnico])) {
+                        $tecnicosData[$tecnico] = [
+                            'tecnico' => $tecnico,
+                            'horas_trabajadas' => 0,
+                            'vehiculos_trabajados' => 0,
+                            'tiempos' => []
+                        ];
+                    }
+                    
+                    $tecnicosData[$tecnico]['horas_trabajadas'] += $horas;
+                    $tecnicosData[$tecnico]['vehiculos_trabajados']++;
+                    
+                    if ($horas > 0) {
+                        $tecnicosData[$tecnico]['tiempos'][] = $horas;
+                    }
+                }
+            }
+            
+            if (empty($tecnicosData)) {
+                return response()->json([
+                    'success' => true, 
+                    'data' => [],
+                    'message' => 'No hay datos de técnicos disponibles'
+                ]);
+            }
+            
+            $maxTrabajos = 0;
+            foreach ($tecnicosData as $tecnico) {
+                $maxTrabajos = max($maxTrabajos, $tecnico['vehiculos_trabajados']);
+            }
+            
+            $result = [];
+            foreach ($tecnicosData as $tecnico) {
+                $promedio = 0;
+                if (count($tecnico['tiempos']) > 0) {
+                    $promedio = round(array_sum($tecnico['tiempos']) / count($tecnico['tiempos']), 2);
+                }
+                
+                $porcentajeTrabajos = $maxTrabajos > 0 ? ($tecnico['vehiculos_trabajados'] / $maxTrabajos) * 100 : 0;
+                
+                if ($porcentajeTrabajos >= 70 && $promedio <= 5) {
+                    $rendimiento = 'Alto';
+                    $rendimientoClass = 'rendimiento-alta';
+                    $rendimientoIcon = '🚀';
+                } elseif ($porcentajeTrabajos >= 40 && $promedio <= 10) {
+                    $rendimiento = 'Medio';
+                    $rendimientoClass = 'rendimiento-media';
+                    $rendimientoIcon = '📈';
+                } else {
+                    $rendimiento = 'Bajo';
+                    $rendimientoClass = 'rendimiento-baja';
+                    $rendimientoIcon = '📉';
+                }
+                
+                $result[] = [
+                    'tecnico' => $tecnico['tecnico'],
+                    'trabajos' => $tecnico['vehiculos_trabajados'],
+                    'tiempo_promedio' => $promedio,
+                    'horas_trabajadas' => round($tecnico['horas_trabajadas'], 2),
+                    'rendimiento' => $rendimiento,
+                    'rendimiento_class' => $rendimientoClass,
+                    'rendimiento_icon' => $rendimientoIcon,
+                    'porcentaje' => round($porcentajeTrabajos, 1)
+                ];
+            }
+            
+            usort($result, fn($a, $b) => $b['horas_trabajadas'] <=> $a['horas_trabajadas']);
+            
+            return response()->json(['success' => true, 'data' => $result]);
+            
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('Error en technicianPerformance:', [
+                'message' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            return response()->json([
+                'success' => false, 
+                'error' => 'Error al cargar rendimiento de técnicos: ' . $e->getMessage(),
+                'data' => []
+            ], 500);
+        }
+    }
+
+    /**
+     * Parsear fecha y hora del historial
+     * El formato de fecha es "d/m/Y" (ej: 9/5/2026)
+     * El formato de hora es "H:i:s" o "H:i" (ej: 09:13:00 o 09:13)
+     */
+    private function parseFecha($fechaStr, $horaStr = null)
+    {
+        if (empty($fechaStr)) {
+            return null;
+        }
+        
+        try {
+            // Parsear fecha en formato d/m/Y
+            $partes = explode('/', $fechaStr);
+            if (count($partes) !== 3) {
+                return null;
+            }
+            
+            $dia = intval($partes[0]);
+            $mes = intval($partes[1]);
+            $año = intval($partes[2]);
+            
+            if (!checkdate($mes, $dia, $año)) {
+                return null;
+            }
+            
+            $fecha = Carbon::create($año, $mes, $dia, 0, 0, 0);
+            
+            if ($horaStr) {
+                // Parsear hora en formato H:i:s o H:i
+                $horaPartes = explode(':', $horaStr);
+                if (count($horaPartes) >= 2) {
+                    $horas = intval($horaPartes[0]);
+                    $minutos = intval($horaPartes[1]);
+                    $segundos = count($horaPartes) >= 3 ? intval($horaPartes[2]) : 0;
+                    $fecha->setTime($horas, $minutos, $segundos);
+                }
+            }
+            
+            return $fecha;
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('Error parseando fecha:', [
+                'fecha' => $fechaStr,
+                'hora' => $horaStr,
+                'error' => $e->getMessage()
+            ]);
+            return null;
+        }
+    }
+
+    /**
+     * Extraer todos los técnicos de un string
+     */
+    private function extractTechnicians($tecnicoString)
+    {
+        $tecnicos = [];
+        
+        if (preg_match('/\(Colaboraron:\s*([^)]+)\)/i', $tecnicoString, $matches)) {
+            $tecnicoPrincipal = trim(preg_replace('/\s*\(Colaboraron:.*\)/i', '', $tecnicoString));
+            if (!empty($tecnicoPrincipal)) {
+                $tecnicos[] = $tecnicoPrincipal;
+            }
+            
+            $colaboradores = explode(',', $matches[1]);
+            foreach ($colaboradores as $colaborador) {
+                $colaborador = trim($colaborador);
+                if (!empty($colaborador) && !in_array($colaborador, $tecnicos)) {
+                    $tecnicos[] = $colaborador;
+                }
+            }
+        } else {
+            $tecnicos[] = trim($tecnicoString);
+        }
+        
+        $tecnicos = array_map(function($t) {
+            return preg_replace('/^Técnico\s+/i', '', $t);
+        }, $tecnicos);
+        
+        return $tecnicos;
+    }
+        
     /**
      * Datos vacíos para estadísticas (fallback)
      */
