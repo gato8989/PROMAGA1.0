@@ -1,5 +1,3 @@
-[README.md](https://github.com/user-attachments/files/35007568/README_PROMAGA1.0.md)
-
 # ProMaga 1.0
 
 Sistema web de gestión y seguimiento de operaciones para un taller
@@ -7,12 +5,12 @@ automotriz. ProMaga centraliza el registro de vehículos y servicios, el
 control de trabajos en curso, el historial de servicios, la
 administración de clientes y el análisis del desempeño del taller.
 
-## 🌐 Demo
+## Demo
 
 **Aplicación desplegada:**\
 \[https://promaga.up.railway.app/\]
 
-## 📋 Descripción del proyecto
+## Descripción del proyecto
 
 Es una aplicación web diseñada para apoyar la operación diaria
 de un taller automotriz. Permite registrar los vehículos que ingresan al
@@ -27,7 +25,7 @@ El sistema utiliza una API desarrollada con Laravel para gestionar la
 información y proporcionar los servicios que consume la interfaz
 construida con React.
 
-## ✨ Funcionalidades principales
+## Funcionalidades principales
 
 ### 1. Gestión de trabajos y vehículos
 
@@ -92,7 +90,7 @@ construida con React.
 -   Administrar usuarios y roles.
 -   Proteger los endpoints privados de la API mediante Laravel Sanctum.
 
-## 🛠️ Tecnologías utilizadas
+## Tecnologías utilizadas
 
 ### Backend
 
@@ -136,7 +134,7 @@ construida con React.
                                       del código fuente.
   -----------------------------------------------------------------------
 
-## 🗂️ Estructura del proyecto
+## Estructura del proyecto
 
 ``` text
 PROMAGA1.0/
@@ -167,12 +165,12 @@ PROMAGA1.0/
 └── webpack.mix.js          
 ```
 
-## 👨‍💻 Autor y repositorio
+## Autor y repositorio
 
 **Proyecto:** ProMaga 1.0\
 **Repositorio:**
 [github.com/gato8989/PROMAGA1.0](https://github.com/gato8989/PROMAGA1.0)
-Diego Ivan Orozco Gallarza
+   Diego Ivan Orozco Gallarza
 
 ------------------------------------------------------------------------
 
